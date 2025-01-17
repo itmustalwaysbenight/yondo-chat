@@ -23,7 +23,7 @@ const { currentDate, currentYear } = getCurrentDateInfo();
 const SYSTEM_PROMPT = `You are a travel planning assistant. The current date is ${currentDate}.
 
 Your task is to:
-1. Ask "Hi! I'm your travel assistant. Where would you like to travel to?"
+1. Ask "This is Yondo. Where are you going?"
 2. Then ask "When would you like to visit [destination]?"
 3. When you have both the destination and dates, respond with a JSON object in this exact format:
 
@@ -66,7 +66,7 @@ export const getTravelResponse = async (userInput: string, history: { role: stri
       },
       {
         role: 'model',
-        parts: [{ text: "Hi! I'm your travel assistant. Where would you like to travel to?" }]
+        parts: [{ text: "This is Yondo. Where are you going?" }]
       },
       ...history.map(msg => ({
         role: msg.role === 'user' ? 'user' : 'model',
@@ -129,12 +129,13 @@ export const handleStoreTravelPlan = async (
     console.log('📅 End date:', info.end_date);
     console.log('👤 User ID:', userId);
     
-    const planWithUser = {
-      ...info,
-      user_id: userId
-    };
-
-    const storedPlan = await createTravelPlan(planWithUser);
+    const storedPlan = await createTravelPlan(
+      userId,
+      info.destination,
+      info.start_date,
+      info.end_date
+    );
+    
     console.log('\n✅ TRAVEL PLAN STORED SUCCESSFULLY');
     console.log('ID:', storedPlan.id);
     console.log('Created at:', storedPlan.created_at);

@@ -1,88 +1,90 @@
 'use client';
 
-import { useState, useCallback, useEffect } from 'react';
-import { v4 as uuidv4 } from 'uuid';
-import { getTravelResponse, handleStoreTravelPlan } from '../lib/gemini/client';
-
-export interface Message {
-  id: string;
-  content: string;
-  role: 'user' | 'assistant';
-  created_at: string;
-}
+import { useState, useEffect } from 'react';
+import { getTravelResponse } from '../lib/gemini/client';
+import { supabase, createTravelPlan } from '../lib/supabase/client';
+import { useRouter } from 'next/navigation';
 
 export const useChat = () => {
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<{ content: string; role: string }[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [userId] = useState(() => {
-    if (typeof window !== 'undefined') {
-      const stored = localStorage.getItem('userId');
-      if (stored) return stored;
-      const newId = uuidv4();
-      localStorage.setItem('userId', newId);
-      return newId;
-    }
-    return uuidv4();
-  });
+  const [userId, setUserId] = useState<string | null>(null);
+  const router = useRouter();
 
-  // Add initial greeting
   useEffect(() => {
-    const initialMessage: Message = {
-      id: uuidv4(),
-      content: "Hi! I'm your travel assistant. Where would you like to travel to?",
-      role: 'assistant',
-      created_at: new Date().toISOString()
+    const initializeChat = async () => {
+      try {
+        // Get the current user
+        const { data: { user }, error: userError } = await supabase.auth.getUser();
+        if (userError) throw userError;
+
+        if (!user) {
+          router.push('/login');
+          return;
+        }
+
+        setUserId(user.id);
+
+        // Set initial greeting
+        const greeting = 'This is Yondo. Where are you going?';
+        setMessages([{ content: greeting, role: 'assistant' }]);
+      } catch (error) {
+        console.error('Error initializing chat:', error);
+        setError('Failed to initialize chat');
+      }
     };
-    setMessages([initialMessage]);
-  }, []);
 
-  const sendMessage = useCallback(async (content: string) => {
+    initializeChat();
+  }, [router]);
+
+  const sendMessage = async (content: string) => {
+    if (!userId) {
+      setError('Chat not initialized');
+      return;
+    }
+
     try {
-      setError(null);
       setIsLoading(true);
+      setError(null);
 
-      // Add user message
-      const userMessage: Message = {
-        id: uuidv4(),
-        content,
-        role: 'user',
-        created_at: new Date().toISOString(),
-      };
-      
+      // Add user message to state
+      const userMessage = { content, role: 'user' };
       setMessages(prev => [...prev, userMessage]);
 
-      // Get chat history in the format expected by the API
-      const history = messages.map(msg => ({
-        role: msg.role,
-        content: msg.content
-      }));
-
       // Get AI response
-      const response = await getTravelResponse(content, history, userId);
+      const aiResponse = await getTravelResponse(content, messages, userId);
       
-      if (response) {
-        // Add AI response
-        setMessages(prev => [...prev, {
-          id: uuidv4(),
-          content: response,
-          role: 'assistant',
-          created_at: new Date().toISOString(),
-        }]);
-      }
+      // Add AI response to state
+      const assistantMessage = { content: aiResponse, role: 'assistant' };
+      setMessages(prev => [...prev, assistantMessage]);
 
-    } catch (err) {
-      console.error('Error in sendMessage:', err);
-      setError(err instanceof Error ? err.message : 'An error occurred');
+      // If the response contains travel plan data, store it in Supabase
+      try {
+        const travelPlan = JSON.parse(aiResponse);
+        if (travelPlan.travel_plan) {
+          await createTravelPlan(
+            userId,
+            travelPlan.travel_plan.destination,
+            travelPlan.travel_plan.start_date,
+            travelPlan.travel_plan.end_date
+          );
+        }
+      } catch (e) {
+        // Not a travel plan JSON response, ignore
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setError('Failed to send message');
     } finally {
       setIsLoading(false);
     }
-  }, [messages, userId]);
+  };
 
   return {
     messages,
     isLoading,
     error,
-    sendMessage
+    sendMessage,
   };
 };

@@ -1,59 +1,54 @@
 // Path: app/components/chat/ChatInput.tsx
 'use client';
 
-import { useState, KeyboardEvent } from 'react';
+import { useState, FormEvent } from 'react';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
-  isLoading: boolean;
+  disabled?: boolean;
 }
 
-export default function ChatInput({ onSend, isLoading }: ChatInputProps) {
+export default function ChatInput({ onSend, disabled }: ChatInputProps) {
   const [message, setMessage] = useState('');
 
-  const handleSubmit = () => {
-    if (message.trim() && !isLoading) {
-      onSend(message);
+  const handleSubmit = (e: FormEvent) => {
+    e.preventDefault();
+    if (message.trim() && !disabled) {
+      onSend(message.trim());
       setMessage('');
     }
   };
 
-  const handleKeyDown = (e: KeyboardEvent) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSubmit();
+      handleSubmit(e as unknown as FormEvent);
     }
   };
 
   return (
-    <div className="relative">
-      <textarea
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        onKeyDown={handleKeyDown}
-        placeholder="Message Yondo..."
-        className="w-full px-8 py-5 bg-[#2C2C2F] rounded-2xl
-                   text-lg text-white placeholder-gray-400
-                   focus:outline-none focus:ring-2 focus:ring-blue-500/50
-                   resize-none h-[68px] pr-28"
-        disabled={isLoading}
-      />
-      <button
-        onClick={handleSubmit}
-        disabled={!message.trim() || isLoading}
-        className={`absolute right-4 top-1/2 -translate-y-1/2
-                   px-5 py-2.5 rounded-xl text-base
-                   transition-all
-                   ${message.trim() && !isLoading ?
-                     'bg-blue-600 text-white hover:bg-blue-700' :
-                     'bg-gray-700 text-gray-400'
-                   }`}
-      >
-        {isLoading ? 
-          <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin" /> :
-          'Send'
-        }
-      </button>
-    </div>
+    <form onSubmit={handleSubmit} className="flex flex-row lg:max-w-4xl lg:mx-auto md:mx-4 mx-2">
+      <div className="relative flex flex-1">
+        <textarea
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          onKeyDown={handleKeyDown}
+          disabled={disabled}
+          placeholder="Send a message"
+          rows={1}
+          className="w-full resize-none bg-[#3a3b42] border border-gray-600/50 p-4 pr-12 text-white focus:ring-0 focus-visible:ring-0 focus:outline-none focus:border-gray-400 rounded-xl transition-colors text-base"
+          style={{ maxHeight: '200px', height: '60px', overflowY: 'hidden' }}
+        />
+        <button
+          type="submit"
+          disabled={!message.trim() || disabled}
+          className="absolute right-3 bottom-3.5 p-1 text-gray-400 hover:text-gray-200 disabled:hover:bg-transparent disabled:opacity-40"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5">
+            <path d="M3.478 2.404a.75.75 0 0 0-.926.941l2.432 7.905H13.5a.75.75 0 0 1 0 1.5H4.984l-2.432 7.905a.75.75 0 0 0 .926.94 60.519 60.519 0 0 0 18.445-8.986.75.75 0 0 0 0-1.218A60.517 60.517 0 0 0 3.478 2.404Z" />
+          </svg>
+        </button>
+      </div>
+    </form>
   );
 }

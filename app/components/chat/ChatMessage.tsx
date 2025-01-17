@@ -2,35 +2,24 @@
 'use client';
 
 interface ChatMessageProps {
-  message: {
-    content: string;
-    role: 'user' | 'assistant';
-  };
+  role: string;
+  content: string;
 }
 
-export default function ChatMessage({ message }: ChatMessageProps) {
-  const isUser = message.role === 'user';
-  
+export default function ChatMessage({ role, content }: ChatMessageProps) {
+  const isUser = role === 'user';
+
   return (
-    <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-8`}>
-      {!isUser && (
-        <div className="w-8 h-8 bg-blue-600 rounded-lg mr-4 flex-shrink-0 flex items-center justify-center">
-          <span className="text-white font-semibold text-sm">Y</span>
+    <div className={`group w-full text-gray-100 border-b border-black/10 ${isUser ? 'bg-[#343541]' : 'bg-[#444654]'}`}>
+      <div className="max-w-2xl mx-auto flex gap-6 p-6 text-lg">
+        <div className="min-w-[40px] text-right font-semibold">
+          {isUser ? 'You' : 'AI'}
         </div>
-      )}
-      <div className={`
-        max-w-[80%] md:max-w-[70%] lg:max-w-[60%]
-        rounded-2xl
-        px-8 py-5
-        transition-all
-        ${isUser ? 
-          'bg-blue-600 text-white' : 
-          'bg-[#2C2C2F] text-white/90'
-        }
-      `}>
-        <p className="text-lg leading-relaxed whitespace-pre-wrap">
-          {message.content}
-        </p>
+        <div className="prose prose-invert prose-lg flex-1">
+          <p className="whitespace-pre-wrap leading-relaxed">
+            {content}
+          </p>
+        </div>
       </div>
     </div>
   );

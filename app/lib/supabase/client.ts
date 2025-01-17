@@ -1,38 +1,43 @@
 // Path: app/lib/supabase/client.ts
-import { createClient } from '@supabase/supabase-js';
-import { TravelPlan } from '../gemini/client';
+import { createBrowserClient } from '@supabase/ssr';
 
-if (!process.env.NEXT_PUBLIC_SUPABASE_URL) {
-  throw new Error('Missing NEXT_PUBLIC_SUPABASE_URL environment variable');
-}
-
-if (!process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-  throw new Error('Missing NEXT_PUBLIC_SUPABASE_ANON_KEY environment variable');
-}
-
-export const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+export const supabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-export const createTravelPlan = async (plan: TravelPlan) => {
-  const { data, error } = await supabase
-    .from('travel_plans')
-    .insert(plan)
-    .select()
-    .single();
+export interface TravelPlan {
+  id: string;
+  user_id: string;
+  destination: string;
+  start_date: string;
+  end_date: string;
+  created_at: string;
+}
 
-  if (error) throw error;
-  return data;
-};
+export const createTravelPlan = async (userId: string, destination: string, startDate: string, endDate: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('travel_plans')
+      .insert([
+        {
+          user_id: userId,
+          destination,
+          start_date: startDate,
+          end_date: endDate,
+        },
+      ])
+      .select()
+      .single();
 
-export const getTravelPlans = async (userId: string) => {
-  const { data, error } = await supabase
-    .from('travel_plans')
-    .select('*')
-    .eq('user_id', userId)
-    .order('created_at', { ascending: false });
+    if (error) {
+      console.error('Error creating travel plan:', error.message, error.details, error.hint, error.code);
+      throw error;
+    }
 
-  if (error) throw error;
-  return data;
+    return data;
+  } catch (error) {
+    console.error('Error in createTravelPlan:', error);
+    throw error;
+  }
 };

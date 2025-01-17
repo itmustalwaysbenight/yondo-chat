@@ -6,8 +6,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Notion-style Chatbot",
-  description: "A clean, minimalistic chatbot with Supabase integration",
+  title: "Travel Assistant",
+  description: "Your AI-powered travel planning companion",
 };
 
 export default function RootLayout({
