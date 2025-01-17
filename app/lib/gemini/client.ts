@@ -87,7 +87,10 @@ export const getTravelResponse = async (userInput: string, history: { role: stri
     if (text) {
       try {
         console.log('Attempting to parse JSON from:', text);
-        const parsed = JSON.parse(text);
+        // Clean up markdown formatting before parsing
+        const cleanText = text.replace(/```json\n?|\n?```/g, '').trim();
+        console.log('Cleaned text:', cleanText);
+        const parsed = JSON.parse(cleanText);
         console.log('Successfully parsed JSON:', parsed);
         
         if (parsed.function === 'storeTravelPlan' && parsed.parameters) {
@@ -121,7 +124,10 @@ export const handleStoreTravelPlan = async (
   info: TravelPlan,
   userId: string
 ) => {
-  console.log('🔥 handleStoreTravelPlan CALLED!');
+  console.log('\n🔍 HANDLING TRAVEL PLAN');
+  console.log('Current User ID:', userId);
+  console.log('Travel Info:', info);
+  
   try {
     console.log('\n=== STORING TRAVEL PLAN ===');
     console.log('📍 Destination:', info.destination);
@@ -138,6 +144,7 @@ export const handleStoreTravelPlan = async (
     
     console.log('\n✅ TRAVEL PLAN STORED SUCCESSFULLY');
     console.log('ID:', storedPlan.id);
+    console.log('User ID:', storedPlan.user_id);
     console.log('Created at:', storedPlan.created_at);
     console.log('===========================\n');
     
