@@ -2,6 +2,7 @@
 'use client';
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import { createTravelPlan } from '../supabase/client';
 
 if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
   throw new Error('Missing NEXT_PUBLIC_GEMINI_API_KEY environment variable');
@@ -19,89 +20,131 @@ const getCurrentDateInfo = () => {
 
 const { currentDate, currentYear } = getCurrentDateInfo();
 
-const SYSTEM_PROMPT = `You are a travel planning assistant. The current date is ${currentDate} (YYYY-MM-DD format).
+const SYSTEM_PROMPT = `You are a travel planning assistant. The current date is ${currentDate}.
 
-When destination and dates are provided, output in this exact format:
-
-\`\`\`json {
-  "travel_plan": {
-    "destination": "[place]",
-    "start_date": "YYYY-MM-DD",
-    "end_date": "YYYY-MM-DD"
-  }
-}
-\`\`\`
-
-Keep responses focused on collecting:
+Your task is to:
 1. Ask "Hi! I'm your travel assistant. Where would you like to travel to?"
 2. Then ask "When would you like to visit [destination]?"
-3. Output JSON when both are provided
+3. When you have both the destination and dates, respond with a JSON object in this exact format:
+
+{
+  "function": "storeTravelPlan",
+  "parameters": {
+    "destination": "berlin",
+    "start_date": "2024-06-01",
+    "end_date": "2024-06-05"
+  }
+}
 
 If user mentions relative dates like "next year", use ${currentYear + 1} as the year.
-Do not ask about or discuss anything else.`;
-
-export const geminiModel = genAI.getGenerativeModel({ 
-  model: "gemini-1.5-flash",
-  generationConfig: {
-    temperature: 0.1,
-    candidateCount: 1,
-    maxOutputTokens: 1000,
-  }
-});
+Keep responses focused and concise. Do not provide any additional information.`;
 
 export interface TravelPlan {
   destination: string;
   start_date: string;
   end_date: string;
+  user_id?: string;
 }
 
-export const parseTravelInfo = (response: string): TravelPlan | null => {
-  try {
-    // Find JSON between backticks
-    const jsonMatch = response.match(/```json\s*({[\s\S]*?})\s*```/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[1]);
-      return parsed.travel_plan;
-    }
-    return null;
-  } catch (error) {
-    console.error('Failed to parse travel info:', error);
-    return null;
-  }
-};
-
-export const handleStoreTravelPlan = async (info: TravelPlan) => {
-  console.log('Storing travel plan:', info);
-  return `Great! I've saved your trip to ${info.destination} from ${info.start_date} to ${info.end_date}.`;
-};
-
-export const getTravelResponse = async (userInput: string, history: { role: string, content: string }[] = []) => {
-  // Always include system prompt as first message in history
-  const fullHistory = [
-    {
-      role: 'user',
-      parts: [{ text: SYSTEM_PROMPT }]
-    },
-    {
-      role: 'model',
-      parts: [{ text: "Hi! I'm your travel assistant. Where would you like to travel to?" }]
-    },
-    ...history.map(msg => ({
-      role: msg.role === 'user' ? 'user' : 'model',
-      parts: [{ text: msg.content }]
-    }))
-  ];
-
-  const chat = geminiModel.startChat({
-    history: fullHistory,
+export const getTravelResponse = async (userInput: string, history: { role: string, content: string }[] = [], userId: string) => {
+  console.log('\n=== PROCESSING MESSAGE ===');
+  console.log('User input:', userInput);
+  
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-1.5-flash-latest",
     generationConfig: {
-      temperature: 0.1,
-      candidateCount: 1,
-      maxOutputTokens: 1000,
+      temperature: 0,
+      maxOutputTokens: 500,
     }
   });
 
-  const result = await chat.sendMessage([{ text: userInput }]);
-  const response = await result.response;
-  return response.text();
+  const chat = model.startChat({
+    history: [
+      {
+        role: 'user',
+        parts: [{ text: SYSTEM_PROMPT }]
+      },
+      {
+        role: 'model',
+        parts: [{ text: "Hi! I'm your travel assistant. Where would you like to travel to?" }]
+      },
+      ...history.map(msg => ({
+        role: msg.role === 'user' ? 'user' : 'model',
+        parts: [{ text: msg.content }]
+      }))
+    ]
+  });
+
+  try {
+    const result = await chat.sendMessage(userInput);
+    const response = await result.response;
+    console.log('Full response:', response);
+
+    // Try to parse JSON from the response
+    const text = response.text();
+    console.log('Raw text response:', text);
+    
+    if (text) {
+      try {
+        console.log('Attempting to parse JSON from:', text);
+        const parsed = JSON.parse(text);
+        console.log('Successfully parsed JSON:', parsed);
+        
+        if (parsed.function === 'storeTravelPlan' && parsed.parameters) {
+          console.log('✅ Valid function call detected');
+          console.log('Function name:', parsed.function);
+          console.log('Parameters:', parsed.parameters);
+          
+          const confirmation = await handleStoreTravelPlan(parsed.parameters, userId);
+          console.log('Got confirmation:', confirmation);
+          return confirmation;
+        } else {
+          console.log('❌ Not a valid function call:', parsed);
+        }
+      } catch (e) {
+        // Not JSON or not in the expected format, just return the response
+        console.log('❌ Failed to parse JSON:', e);
+        console.log('Raw text was:', text);
+      }
+    } else {
+      console.log('❌ No text in response');
+    }
+    
+    return text || "I didn't understand that. Could you please try again?";
+  } catch (error) {
+    console.error('Error in getTravelResponse:', error);
+    throw error;
+  }
+};
+
+export const handleStoreTravelPlan = async (
+  info: TravelPlan,
+  userId: string
+) => {
+  console.log('🔥 handleStoreTravelPlan CALLED!');
+  try {
+    console.log('\n=== STORING TRAVEL PLAN ===');
+    console.log('📍 Destination:', info.destination);
+    console.log('📅 Start date:', info.start_date);
+    console.log('📅 End date:', info.end_date);
+    console.log('👤 User ID:', userId);
+    
+    const planWithUser = {
+      ...info,
+      user_id: userId
+    };
+
+    const storedPlan = await createTravelPlan(planWithUser);
+    console.log('\n✅ TRAVEL PLAN STORED SUCCESSFULLY');
+    console.log('ID:', storedPlan.id);
+    console.log('Created at:', storedPlan.created_at);
+    console.log('===========================\n');
+    
+    return `Great! I've saved your trip to ${info.destination} from ${info.start_date} to ${info.end_date}.`;
+  } catch (error) {
+    console.log('\n❌ FAILED TO STORE TRAVEL PLAN');
+    console.log('Error:', error instanceof Error ? error.message : 'Unknown error');
+    console.log('===========================\n');
+    return `I've noted your trip to ${info.destination} from ${info.start_date} to ${info.end_date}, but there was an issue saving it.`;
+  }
 };

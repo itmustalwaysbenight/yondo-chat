@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { getTravelResponse, parseTravelInfo, handleStoreTravelPlan } from '../lib/gemini/client';
+import { v4 as uuidv4 } from 'uuid';
+import { getTravelResponse, handleStoreTravelPlan } from '../lib/gemini/client';
 
 export interface Message {
   id: string;
@@ -14,11 +15,21 @@ export const useChat = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [userId] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('userId');
+      if (stored) return stored;
+      const newId = uuidv4();
+      localStorage.setItem('userId', newId);
+      return newId;
+    }
+    return uuidv4();
+  });
 
-  // Add initial greeting without adding it to Gemini history
+  // Add initial greeting
   useEffect(() => {
     const initialMessage: Message = {
-      id: crypto.randomUUID(),
+      id: uuidv4(),
       content: "Hi! I'm your travel assistant. Where would you like to travel to?",
       role: 'assistant',
       created_at: new Date().toISOString()
@@ -28,70 +39,50 @@ export const useChat = () => {
 
   const sendMessage = useCallback(async (content: string) => {
     try {
-      setIsLoading(true);
       setError(null);
-      
-      // Create user message
+      setIsLoading(true);
+
+      // Add user message
       const userMessage: Message = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         content,
         role: 'user',
-        created_at: new Date().toISOString()
+        created_at: new Date().toISOString(),
       };
       
       setMessages(prev => [...prev, userMessage]);
 
-      // Convert messages to history format
-      const history = messages
-        .filter(msg => msg.role === 'user' || messages.some(m => m.role === 'user' && m.created_at < msg.created_at))
-        .map(msg => ({
-          role: msg.role === 'user' ? 'user' : 'model',
-          content: msg.content
-        }));
+      // Get chat history in the format expected by the API
+      const history = messages.map(msg => ({
+        role: msg.role,
+        content: msg.content
+      }));
 
-      // Get response using new chat approach
-      const aiResponse = await getTravelResponse(content, history);
+      // Get AI response
+      const response = await getTravelResponse(content, history, userId);
       
-      // Check for travel info
-      const travelInfo = parseTravelInfo(aiResponse);
-      
-      if (travelInfo) {
-        const confirmationMessage = await handleStoreTravelPlan(travelInfo);
-        
-        // Add AI response without the STORE_TRAVEL_PLAN part
-        const cleanResponse = aiResponse.split('STORE_TRAVEL_PLAN')[0].trim();
-        if (cleanResponse) {
-          setMessages(prev => [...prev, {
-            id: crypto.randomUUID(),
-            content: cleanResponse,
-            role: 'assistant',
-            created_at: new Date().toISOString()
-          }]);
-        }
-        
-        // Add confirmation message
+      if (response) {
+        // Add AI response
         setMessages(prev => [...prev, {
-          id: crypto.randomUUID(),
-          content: confirmationMessage,
+          id: uuidv4(),
+          content: response,
           role: 'assistant',
-          created_at: new Date().toISOString()
-        }]);
-      } else {
-        // Normal response
-        setMessages(prev => [...prev, {
-          id: crypto.randomUUID(),
-          content: aiResponse,
-          role: 'assistant',
-          created_at: new Date().toISOString()
+          created_at: new Date().toISOString(),
         }]);
       }
+
     } catch (err) {
-      console.error('Error sending message:', err);
-      setError('Failed to send message. Please try again.');
+      console.error('Error in sendMessage:', err);
+      setError(err instanceof Error ? err.message : 'An error occurred');
     } finally {
       setIsLoading(false);
     }
-  }, [messages]);
+  }, [messages, userId]);
 
-  return { messages, sendMessage, isLoading, error };
+  return {
+    messages,
+    isLoading,
+    error,
+    sendMessage
+  };
 };
