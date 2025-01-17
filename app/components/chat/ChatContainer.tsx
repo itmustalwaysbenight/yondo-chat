@@ -2,7 +2,6 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { Message } from '../../lib/supabase/client';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import ChatHeader from './ChatHeader';

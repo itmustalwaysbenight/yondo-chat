@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
-import { geminiModel, parseTravelInfo, TravelInfo, TRAVEL_SYSTEM_PROMPT, handleStoreTravelPlan, getTravelResponse } from '../lib/gemini/client';
+import { getTravelResponse, parseTravelInfo, handleStoreTravelPlan } from '../lib/gemini/client';
 
 export interface Message {
   id: string;

@@ -1,8 +1,6 @@
 // Path: app/components/chat/ChatMessage.tsx
 'use client';
 
-import { Message } from '../../lib/supabase/client';
-
 interface ChatMessageProps {
   message: {
     content: string;
