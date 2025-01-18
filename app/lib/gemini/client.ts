@@ -20,49 +20,19 @@ const getCurrentDateInfo = () => {
 
 const { currentDate, currentYear } = getCurrentDateInfo();
 
-const SYSTEM_PROMPT = `You are Yondo, a travel assistant focused exclusively on helping users plan and manage their trips. 
+const SYSTEM_PROMPT = `You are Yondo, a friendly travel assistant. You help users plan and manage their trips.
 
-When users mention a destination and dates for a new trip, respond with:
-{
-  "function": "storeTravelPlan",
-  "parameters": {
-    "destination": "city",
-    "start_date": "YYYY-MM-DD",
-    "end_date": "YYYY-MM-DD"
-  }
-}
+When users want to store a new trip, use this format (on a single line, no line breaks):
+<function>storeTravelPlan{"destination":"city","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}</function>
 
-When users want to delete/remove/cancel a specific trip, respond with:
-{
-  "function": "delete_trip",
-  "parameters": {
-    "destination": "city",
-    "start_date": "YYYY-MM-DD",
-    "end_date": "YYYY-MM-DD"
-  }
-}
+When users want to change dates for an existing trip, use this format (on a single line):
+<function>updateTravelPlan{"old_trip":{"destination":"city","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"},"new_trip":{"destination":"city","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}</function>
 
-When users want to delete all trips (using phrases like "delete all", "remove all", "cancel all"), respond with:
-{
-  "function": "delete_all_trips"
-}
+When users want to delete a trip, use this format (on a single line):
+<function>delete_trip{"destination":"city","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}</function>
 
-When users want to change dates for an existing trip, respond with:
-{
-  "function": "updateTravelPlan",
-  "parameters": {
-    "old_trip": {
-      "destination": "city",
-      "start_date": "YYYY-MM-DD",
-      "end_date": "YYYY-MM-DD"
-    },
-    "new_trip": {
-      "destination": "city",
-      "start_date": "YYYY-MM-DD",
-      "end_date": "YYYY-MM-DD"
-    }
-  }
-}
+When users want to delete all trips, use this format (on a single line):
+<function>delete_all_trips</function>
 
 Core behaviors:
 1. Stay focused on travel planning and trip management
@@ -91,31 +61,40 @@ export interface TravelPlan {
 
 const parseTravelPlanAction = (text: string): any => {
   try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+    // Look for function calls in the format <function>name{json}</function>
+    const functionMatch = text.match(/<function>([^{]+)(\{.*?\})<\/function>/);
+    if (!functionMatch) return null;
 
-    const json = JSON.parse(jsonMatch[0]);
+    const [_, functionName, jsonString] = functionMatch;
+    const parameters = JSON.parse(jsonString);
     
-    if (json.function === 'delete_all_trips') {
+    if (functionName === 'delete_all_trips') {
       return {
         type: 'delete_all'
       };
     }
     
-    if (json.function === 'delete_trip' && json.parameters) {
+    if (functionName === 'delete_trip') {
       return {
         type: 'delete',
-        destination: json.parameters.destination,
-        start_date: json.parameters.start_date,
-        end_date: json.parameters.end_date
+        destination: parameters.destination,
+        start_date: parameters.start_date,
+        end_date: parameters.end_date
       };
     }
     
-    if (json.function === 'updateTravelPlan' && json.parameters) {
+    if (functionName === 'updateTravelPlan') {
       return {
         type: 'update',
-        old_trip: json.parameters.old_trip,
-        new_trip: json.parameters.new_trip
+        old_trip: parameters.old_trip,
+        new_trip: parameters.new_trip
+      };
+    }
+
+    if (functionName === 'storeTravelPlan') {
+      return {
+        type: 'store',
+        parameters
       };
     }
     
@@ -137,9 +116,8 @@ export const getTravelResponse = async (
   try {
     // Skip processing if the input looks like an error message or log
     if (userInput.includes('client.ts:') || 
-        userInput.includes('Attempting to parse JSON from:') ||
-        userInput.includes('❌ Failed to parse JSON:')) {
-      return "I didn't quite understand that. Could you please tell me where you'd like to travel?";
+        userInput.includes('Attempting to parse JSON from:')) {
+      return "I didn't understand that. Could you please try again?";
     }
 
     const model = genAI.getGenerativeModel({ model: MODEL_NAME });
@@ -160,48 +138,38 @@ export const getTravelResponse = async (
       ],
       generationConfig: {
         temperature: 0.7,
-        maxOutputTokens: 500,
+        maxOutputTokens: 1000,
       }
     });
 
-    // For trip listing requests, fetch and format trips
-    if (userInput.toLowerCase().includes('trips') || userInput.toLowerCase().includes('plans')) {
-      const user = await getCurrentUser();
-      if (!user?.id) {
-        throw new Error('No user ID found');
-      }
-      const trips = await getTravelPlans(user.id);
-      const formattedResponse = await formatTravelPlans(trips);
-      
-      // Stream the formatted response word by word
-      const words = formattedResponse.split(/(?<=\s)/);
-      let streamedResponse = '';
-      
-      for (const word of words) {
-        streamedResponse += word;
-        if (onPartialResponse) {
-          onPartialResponse(word);
-          await new Promise(resolve => setTimeout(resolve, 50));
-        }
-      }
-      
-      return formattedResponse;
-    }
-
     const result = await chat.sendMessage(userInput);
     let fullResponse = '';
+    let visibleResponse = '';
+    let currentFunction = '';
     
     // Handle streaming response
     const response = await result.response;
-    const chunks = response.text().split(/(?<=\s)/);
+    const text = response.text();
+    
+    // Split into chunks, preserving spaces
+    const chunks = text.split(/(?<=\s)/);
+    
     for (const chunk of chunks) {
       fullResponse += chunk;
       
-      // Call the callback with each chunk if provided
-      if (onPartialResponse) {
-        onPartialResponse(chunk);
-        // Add a small delay to simulate natural typing
-        await new Promise(resolve => setTimeout(resolve, 50));
+      // Check if this chunk starts or ends a function call
+      if (chunk.includes('<function>')) {
+        currentFunction = '';
+      } else if (chunk.includes('</function>')) {
+        currentFunction = '';
+      } else if (!currentFunction) {
+        // Only add to visible response if we're not inside a function call
+        visibleResponse += chunk;
+        if (onPartialResponse) {
+          onPartialResponse(chunk);
+          // Add a small delay to simulate natural typing
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
       }
     }
     
@@ -254,51 +222,24 @@ export const getTravelResponse = async (
         }
         return errorMsg;
       }
-    }
-
-    // Try to parse JSON from the response
-    if (fullResponse) {
+    } else if (action?.type === 'store') {
       try {
-        console.log('Attempting to parse JSON from:', fullResponse);
-        
-        // Extract JSON block using regex - look for content between ```json and ``` or just {}
-        const jsonMatch = fullResponse.match(/```json\n?([\s\S]*?)\n?```|(\{[\s\S]*\})/);
-        if (!jsonMatch) {
-          console.log('❌ No JSON block found in response');
-          return fullResponse;
+        const confirmation = await handleStoreTravelPlan(action.parameters, userId);
+        if (onPartialResponse) {
+          onPartialResponse(confirmation);
         }
-        
-        // Use the first matching group (between ``` ```) or second group (just {})
-        const jsonString = (jsonMatch[1] || jsonMatch[2]).trim();
-        console.log('Extracted JSON string:', jsonString);
-        
-        const parsed = JSON.parse(jsonString);
-        console.log('Successfully parsed JSON:', parsed);
-        
-        if (parsed.function === 'storeTravelPlan' && parsed.parameters) {
-          console.log('✅ Valid function call detected');
-          console.log('Function name:', parsed.function);
-          console.log('Parameters:', parsed.parameters);
-          
-          const confirmation = await handleStoreTravelPlan(parsed.parameters, userId);
-          console.log('Got confirmation:', confirmation);
-          if (onPartialResponse) {
-            onPartialResponse(confirmation);
-          }
-          return confirmation;
-        } else {
-          console.log('❌ Not a valid function call:', parsed);
+        return confirmation;
+      } catch (error) {
+        const errorMsg = `I couldn't save that trip. ${error instanceof Error ? error.message : 'Please try again.'}`;
+        if (onPartialResponse) {
+          onPartialResponse(errorMsg);
         }
-      } catch (e) {
-        // Not JSON or not in the expected format, just return the response
-        console.log('❌ Failed to parse JSON:', e);
-        console.log('Raw text was:', fullResponse);
+        return errorMsg;
       }
-    } else {
-      console.log('❌ No text in response');
     }
     
-    return fullResponse || "I didn't understand that. Could you please try again?";
+    // If no action was found, return the visible response
+    return visibleResponse.trim() || "I didn't understand that. Could you please try again?";
   } catch (error) {
     console.error('Error in getTravelResponse:', error);
     throw error;
