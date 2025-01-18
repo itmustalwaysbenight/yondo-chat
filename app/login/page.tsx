@@ -1,11 +1,28 @@
 'use client';
 
 import { signInWithGoogle } from '../lib/supabase/client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '../lib/supabase/client';
 
 export default function LoginPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    // Check if we're already logged in
+    const checkSession = async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      console.log('Current session:', session);
+      if (session) {
+        console.log('User is already logged in, redirecting to home');
+        router.replace('/');
+      }
+    };
+    
+    checkSession();
+  }, [router]);
 
   const handleSignIn = async () => {
     try {
