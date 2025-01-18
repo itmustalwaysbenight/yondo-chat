@@ -10,6 +10,7 @@ Project Structure:
 ├── eslint.config.mjs
 ├── middleware.ts
 ├── next-env.d.ts
+├── next.config.mjs
 ├── next.config.ts
 ├── package-lock.json
 ├── package.json
@@ -74,43 +75,44 @@ app/auth/callback/route.ts
 1 | import { createServerClient } from '@supabase/ssr';
 2 | import { cookies } from 'next/headers';
 3 | import { NextResponse } from 'next/server';
-4 | 
-5 | export async function GET(request: Request) {
-6 |   const requestUrl = new URL(request.url);
-7 |   const code = requestUrl.searchParams.get('code');
-8 | 
-9 |   if (code) {
-10 |     const cookieStore = await cookies();
-11 |     const supabase = createServerClient(
-12 |       process.env.NEXT_PUBLIC_SUPABASE_URL!,
-13 |       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-14 |       {
-15 |         cookies: {
-16 |           get(name: string) {
-17 |             return cookieStore.get(name)?.value;
-18 |           },
-19 |           set(name: string, value: string, options: any) {
-20 |             cookieStore.set({ name, value, ...options });
-21 |           },
-22 |           remove(name: string, options: any) {
-23 |             cookieStore.set({ name, value: '', ...options });
-24 |           },
-25 |         },
-26 |       }
-27 |     );
-28 |     await supabase.auth.exchangeCodeForSession(code);
-29 |   }
-30 | 
-31 |   // URL to redirect to after sign in process completes
-32 |   return NextResponse.redirect(new URL('/', requestUrl.origin));
-33 | } 
+4 | import { getBaseUrl } from '../../lib/utils/url';
+5 | 
+6 | export async function GET(request: Request) {
+7 |   const requestUrl = new URL(request.url);
+8 |   const code = requestUrl.searchParams.get('code');
+9 | 
+10 |   if (code) {
+11 |     const cookieStore = await cookies();
+12 |     const supabase = createServerClient(
+13 |       process.env.NEXT_PUBLIC_SUPABASE_URL!,
+14 |       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+15 |       {
+16 |         cookies: {
+17 |           get(name: string) {
+18 |             return cookieStore.get(name)?.value;
+19 |           },
+20 |           set(name: string, value: string, options: any) {
+21 |             cookieStore.set({ name, value, ...options });
+22 |           },
+23 |           remove(name: string, options: any) {
+24 |             cookieStore.set({ name, value: '', ...options });
+25 |           },
+26 |         },
+27 |       }
+28 |     );
+29 |     await supabase.auth.exchangeCodeForSession(code);
+30 |   }
+31 | 
+32 |   // URL to redirect to after sign in process completes
+33 |   return NextResponse.redirect(new URL('/', getBaseUrl()));
+34 | } 
 ```
 
 app/auth/login/page.tsx
 ```
 1 | 'use client';
 2 | 
-3 | import { signInWithGoogle } from '../../../lib/supabase/client';
+3 | import { signInWithGoogle } from '../../lib/supabase/client';
 4 | 
 5 | export default function LoginPage() {
 6 |   return (
@@ -138,6 +140,48 @@ app/auth/login/page.tsx
 28 |     </div>
 29 |   );
 30 | } 
+```
+
+app/chat/page.tsx
+```
+1 | 'use client';
+2 | 
+3 | import { useEffect } from 'react';
+4 | import { useRouter } from 'next/navigation';
+5 | import { supabase } from '../lib/supabase/client';
+6 | import ChatContainer from '../components/chat/ChatContainer';
+7 | 
+8 | export default function ChatPage() {
+9 |   const router = useRouter();
+10 | 
+11 |   useEffect(() => {
+12 |     const checkAuth = async () => {
+13 |       const { data: { session } } = await supabase.auth.getSession();
+14 |       if (!session) {
+15 |         router.replace('/login');
+16 |       }
+17 |     };
+18 | 
+19 |     checkAuth();
+20 | 
+21 |     // Set up auth state listener
+22 |     const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+23 |       if (event === 'SIGNED_OUT' || !session) {
+24 |         router.replace('/login');
+25 |       }
+26 |     });
+27 | 
+28 |     return () => {
+29 |       subscription.unsubscribe();
+30 |     };
+31 |   }, [router]);
+32 | 
+33 |   return (
+34 |     <main className="flex flex-col h-screen bg-[#343541]">
+35 |       <ChatContainer />
+36 |     </main>
+37 |   );
+38 | } 
 ```
 
 app/components/chat/ChatContainer.tsx
@@ -230,60 +274,61 @@ app/components/chat/ChatHeader.tsx
 3 | 
 4 | import { supabase, checkUserTrips } from '../../lib/supabase/client';
 5 | import { formatTravelPlans } from '../../lib/gemini/client';
-6 | 
-7 | interface ChatHeaderProps {
-8 |   onSignOut: () => void;
-9 |   addMessage: (content: string) => void;
-10 | }
-11 | 
-12 | export default function ChatHeader({ onSignOut, addMessage }: ChatHeaderProps) {
-13 |   const handleCheckTrips = async () => {
-14 |     console.log('🔍 Check Trips button clicked');
-15 |     try {
-16 |       const trips = await checkUserTrips();
-17 |       if (trips) {
-18 |         const formattedTrips = await formatTravelPlans(trips);
-19 |         addMessage(formattedTrips);
-20 |       }
-21 |     } catch (error) {
-22 |       console.error('Error checking trips:', error);
-23 |       addMessage("Sorry, I couldn't retrieve your trips right now.");
-24 |     }
-25 |   };
-26 | 
-27 |   const handleSignOut = async () => {
-28 |     try {
-29 |       await supabase.auth.signOut();
-30 |       window.location.href = '/login';
-31 |     } catch (error) {
-32 |       console.error('Error signing out:', error);
-33 |     }
-34 |   };
-35 | 
-36 |   return (
-37 |     <div className="sticky top-0 z-50 flex items-center justify-between p-8 bg-[#343541]">
-38 |       <h1 className="text-7xl font-extrabold text-gray-200 tracking-tight font-sans">
-39 |         Yondo
-40 |       </h1>
-41 |       <div className="flex items-center space-x-4">
-42 |         <button
-43 |           type="button"
-44 |           onClick={handleCheckTrips}
-45 |           className="px-6 py-3 text-base font-medium rounded-xl text-gray-200 bg-[#3a3b42] hover:bg-[#40414F] focus:outline-none transition-colors border border-gray-600/50"
-46 |         >
-47 |           Check Trips
-48 |         </button>
-49 |         <button
-50 |           type="button"
-51 |           onClick={handleSignOut}
-52 |           className="px-6 py-3 text-base font-medium rounded-xl text-gray-200 bg-[#3a3b42] hover:bg-[#40414F] focus:outline-none transition-colors border border-gray-600/50"
-53 |         >
-54 |           Sign out
-55 |         </button>
-56 |       </div>
-57 |     </div>
-58 |   );
-59 | }
+6 | import { getBaseUrl } from '../../lib/utils/url';
+7 | 
+8 | interface ChatHeaderProps {
+9 |   onSignOut: () => void;
+10 |   addMessage: (content: string) => void;
+11 | }
+12 | 
+13 | export default function ChatHeader({ onSignOut, addMessage }: ChatHeaderProps) {
+14 |   const handleCheckTrips = async () => {
+15 |     console.log('🔍 Check Trips button clicked');
+16 |     try {
+17 |       const trips = await checkUserTrips();
+18 |       if (trips) {
+19 |         const formattedTrips = await formatTravelPlans(trips);
+20 |         addMessage(formattedTrips);
+21 |       }
+22 |     } catch (error) {
+23 |       console.error('Error checking trips:', error);
+24 |       addMessage("Sorry, I couldn't retrieve your trips right now.");
+25 |     }
+26 |   };
+27 | 
+28 |   const handleSignOut = async () => {
+29 |     try {
+30 |       await supabase.auth.signOut();
+31 |       window.location.href = `${getBaseUrl()}/login`;
+32 |     } catch (error) {
+33 |       console.error('Error signing out:', error);
+34 |     }
+35 |   };
+36 | 
+37 |   return (
+38 |     <div className="sticky top-0 z-50 flex items-center justify-between p-8 bg-[#343541]">
+39 |       <h1 className="text-7xl font-extrabold text-gray-200 tracking-tight font-sans">
+40 |         Yondo
+41 |       </h1>
+42 |       <div className="flex items-center space-x-4">
+43 |         <button
+44 |           type="button"
+45 |           onClick={handleCheckTrips}
+46 |           className="px-6 py-3 text-base font-medium rounded-xl text-gray-200 bg-[#3a3b42] hover:bg-[#40414F] focus:outline-none transition-colors border border-gray-600/50"
+47 |         >
+48 |           Check Trips
+49 |         </button>
+50 |         <button
+51 |           type="button"
+52 |           onClick={handleSignOut}
+53 |           className="px-6 py-3 text-base font-medium rounded-xl text-gray-200 bg-[#3a3b42] hover:bg-[#40414F] focus:outline-none transition-colors border border-gray-600/50"
+54 |         >
+55 |           Sign out
+56 |         </button>
+57 |       </div>
+58 |     </div>
+59 |   );
+60 | }
 ```
 
 app/components/chat/ChatInput.tsx
@@ -563,670 +608,650 @@ app/lib/gemini/client.ts
 20 | 
 21 | const { currentDate, currentYear } = getCurrentDateInfo();
 22 | 
-23 | const SYSTEM_PROMPT = `You are Yondo, a travel assistant focused exclusively on helping users plan and manage their trips. 
+23 | const SYSTEM_PROMPT = `You are Yondo, a friendly travel assistant. You help users plan and manage their trips.
 24 | 
-25 | When users mention a destination and dates for a new trip, respond with:
-26 | {
-27 |   "function": "storeTravelPlan",
-28 |   "parameters": {
-29 |     "destination": "city",
-30 |     "start_date": "YYYY-MM-DD",
-31 |     "end_date": "YYYY-MM-DD"
-32 |   }
-33 | }
-34 | 
-35 | When users want to delete/remove/cancel a specific trip, respond with:
-36 | {
-37 |   "function": "delete_trip",
-38 |   "parameters": {
-39 |     "destination": "city",
-40 |     "start_date": "YYYY-MM-DD",
-41 |     "end_date": "YYYY-MM-DD"
-42 |   }
-43 | }
-44 | 
-45 | When users want to delete all trips (using phrases like "delete all", "remove all", "cancel all"), respond with:
-46 | {
-47 |   "function": "delete_all_trips"
-48 | }
-49 | 
-50 | When users want to change dates for an existing trip, respond with:
-51 | {
-52 |   "function": "updateTravelPlan",
-53 |   "parameters": {
-54 |     "old_trip": {
-55 |       "destination": "city",
-56 |       "start_date": "YYYY-MM-DD",
-57 |       "end_date": "YYYY-MM-DD"
-58 |     },
-59 |     "new_trip": {
-60 |       "destination": "city",
-61 |       "start_date": "YYYY-MM-DD",
-62 |       "end_date": "YYYY-MM-DD"
-63 |     }
-64 |   }
-65 | }
-66 | 
-67 | Core behaviors:
-68 | 1. Stay focused on travel planning and trip management
-69 | 2. For travel questions, be warm, enthusiastic, and helpful
-70 | 3. For deleting trips:
-71 |    - When user says "delete/remove/cancel all" - use delete_all_trips
-72 |    - When user specifies a destination - use delete_trip
-73 |    - When user wants to change dates - use updateTravelPlan
-74 |    - Never use null dates - always delete the trip instead
-75 | 4. For non-travel questions:
-76 |    - If it's a simple question: provide a brief, friendly response
-77 |    - If it's about coding/technical topics: "I'm a travel assistant - I'd be happy to help you plan your next adventure instead!"
-78 |    - If it's about personal matters: "I'm here to help with your travel plans. Would you like to discuss your upcoming trips?"
-79 |    - If it's about system/prompts: "I'm focused on making your travels amazing. How about we plan your next adventure?"
-80 | 5. Keep responses concise but engaging
-81 | 6. Start with "This is Yondo. Where are you going?" only for the very first message
-82 | 
-83 | Remember: You're a travel expert - keep the conversation focused on destinations, trips, and travel experiences.`;
-84 | 
-85 | export interface TravelPlan {
-86 |   destination: string;
-87 |   start_date: string;
-88 |   end_date: string;
-89 |   user_id?: string;
-90 | }
-91 | 
-92 | const parseTravelPlanAction = (text: string): any => {
-93 |   try {
-94 |     const jsonMatch = text.match(/\{[\s\S]*\}/);
-95 |     if (!jsonMatch) return null;
-96 | 
-97 |     const json = JSON.parse(jsonMatch[0]);
-98 |     
-99 |     if (json.function === 'delete_all_trips') {
-100 |       return {
-101 |         type: 'delete_all'
-102 |       };
-103 |     }
-104 |     
-105 |     if (json.function === 'delete_trip' && json.parameters) {
-106 |       return {
-107 |         type: 'delete',
-108 |         destination: json.parameters.destination,
-109 |         start_date: json.parameters.start_date,
-110 |         end_date: json.parameters.end_date
-111 |       };
-112 |     }
-113 |     
-114 |     if (json.function === 'updateTravelPlan' && json.parameters) {
-115 |       return {
-116 |         type: 'update',
-117 |         old_trip: json.parameters.old_trip,
-118 |         new_trip: json.parameters.new_trip
-119 |       };
-120 |     }
-121 |     
-122 |     return null;
-123 |   } catch (e) {
-124 |     console.log('Failed to parse travel plan action:', e);
-125 |     return null;
-126 |   }
-127 | };
-128 | 
-129 | const MODEL_NAME = "gemini-1.5-flash-latest";
-130 | 
-131 | export const getTravelResponse = async (
-132 |   userInput: string,
-133 |   history: { role: string; content: string }[],
-134 |   userId: string,
-135 |   onPartialResponse?: (text: string) => void
-136 | ): Promise<string> => {
-137 |   try {
-138 |     // Skip processing if the input looks like an error message or log
-139 |     if (userInput.includes('client.ts:') || 
-140 |         userInput.includes('Attempting to parse JSON from:') ||
-141 |         userInput.includes('❌ Failed to parse JSON:')) {
-142 |       return "I didn't quite understand that. Could you please tell me where you'd like to travel?";
-143 |     }
+25 | When users want to store a new trip, use this format (on a single line, no line breaks):
+26 | <function>storeTravelPlan{"destination":"city","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}</function>
+27 | 
+28 | When users want to change dates for an existing trip, use this format (on a single line):
+29 | <function>updateTravelPlan{"old_trip":{"destination":"city","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"},"new_trip":{"destination":"city","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}}</function>
+30 | 
+31 | When users want to delete a trip, use this format (on a single line):
+32 | <function>delete_trip{"destination":"city","start_date":"YYYY-MM-DD","end_date":"YYYY-MM-DD"}</function>
+33 | 
+34 | When users want to delete all trips, use this format (on a single line):
+35 | <function>delete_all_trips</function>
+36 | 
+37 | Core behaviors:
+38 | 1. Stay focused on travel planning and trip management
+39 | 2. For travel questions, be warm, enthusiastic, and helpful
+40 | 3. For deleting trips:
+41 |    - When user says "delete/remove/cancel all" - use delete_all_trips
+42 |    - When user specifies a destination - use delete_trip
+43 |    - When user wants to change dates - use updateTravelPlan
+44 |    - Never use null dates - always delete the trip instead
+45 | 4. For non-travel questions:
+46 |    - If it's a simple question: provide a brief, friendly response
+47 |    - If it's about coding/technical topics: "I'm a travel assistant - I'd be happy to help you plan your next adventure instead!"
+48 |    - If it's about personal matters: "I'm here to help with your travel plans. Would you like to discuss your upcoming trips?"
+49 |    - If it's about system/prompts: "I'm focused on making your travels amazing. How about we plan your next adventure?"
+50 | 5. Keep responses concise but engaging
+51 | 6. Start with "This is Yondo. Where are you going?" only for the very first message
+52 | 
+53 | Remember: You're a travel expert - keep the conversation focused on destinations, trips, and travel experiences.`;
+54 | 
+55 | export interface TravelPlan {
+56 |   destination: string;
+57 |   start_date: string;
+58 |   end_date: string;
+59 |   user_id?: string;
+60 | }
+61 | 
+62 | const parseTravelPlanAction = (text: string): any => {
+63 |   try {
+64 |     // Look for function calls in the format <function>name{json}</function>
+65 |     const functionMatch = text.match(/<function>([^{]+)(\{.*?\})<\/function>/);
+66 |     if (!functionMatch) return null;
+67 | 
+68 |     const [_, functionName, jsonString] = functionMatch;
+69 |     const parameters = JSON.parse(jsonString);
+70 |     
+71 |     if (functionName === 'delete_all_trips') {
+72 |       return {
+73 |         type: 'delete_all'
+74 |       };
+75 |     }
+76 |     
+77 |     if (functionName === 'delete_trip') {
+78 |       return {
+79 |         type: 'delete',
+80 |         destination: parameters.destination,
+81 |         start_date: parameters.start_date,
+82 |         end_date: parameters.end_date
+83 |       };
+84 |     }
+85 |     
+86 |     if (functionName === 'updateTravelPlan') {
+87 |       return {
+88 |         type: 'update',
+89 |         old_trip: parameters.old_trip,
+90 |         new_trip: parameters.new_trip
+91 |       };
+92 |     }
+93 | 
+94 |     if (functionName === 'storeTravelPlan') {
+95 |       return {
+96 |         type: 'store',
+97 |         parameters
+98 |       };
+99 |     }
+100 |     
+101 |     return null;
+102 |   } catch (e) {
+103 |     console.log('Failed to parse travel plan action:', e);
+104 |     return null;
+105 |   }
+106 | };
+107 | 
+108 | const MODEL_NAME = "gemini-1.5-flash-latest";
+109 | 
+110 | export const getTravelResponse = async (
+111 |   userInput: string,
+112 |   history: { role: string; content: string }[],
+113 |   userId: string,
+114 |   onPartialResponse?: (text: string) => void
+115 | ): Promise<string> => {
+116 |   try {
+117 |     // Skip processing if the input looks like an error message or log
+118 |     if (userInput.includes('client.ts:') || 
+119 |         userInput.includes('Attempting to parse JSON from:')) {
+120 |       return "I didn't understand that. Could you please try again?";
+121 |     }
+122 | 
+123 |     const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+124 |     const chat = model.startChat({
+125 |       history: [
+126 |         {
+127 |           role: 'user',
+128 |           parts: [{ text: SYSTEM_PROMPT }]
+129 |         },
+130 |         ...(history.length === 0 ? [{
+131 |           role: 'model',
+132 |           parts: [{ text: "This is Yondo. Where are you going?" }]
+133 |         }] : []),
+134 |         ...history.map(msg => ({
+135 |           role: msg.role === 'user' ? 'user' : 'model',
+136 |           parts: [{ text: msg.content }]
+137 |         }))
+138 |       ],
+139 |       generationConfig: {
+140 |         temperature: 0.7,
+141 |         maxOutputTokens: 1000,
+142 |       }
+143 |     });
 144 | 
-145 |     const model = genAI.getGenerativeModel({ model: MODEL_NAME });
-146 |     const chat = model.startChat({
-147 |       history: [
-148 |         {
-149 |           role: 'user',
-150 |           parts: [{ text: SYSTEM_PROMPT }]
-151 |         },
-152 |         ...(history.length === 0 ? [{
-153 |           role: 'model',
-154 |           parts: [{ text: "This is Yondo. Where are you going?" }]
-155 |         }] : []),
-156 |         ...history.map(msg => ({
-157 |           role: msg.role === 'user' ? 'user' : 'model',
-158 |           parts: [{ text: msg.content }]
-159 |         }))
-160 |       ],
-161 |       generationConfig: {
-162 |         temperature: 0.7,
-163 |         maxOutputTokens: 500,
-164 |       }
-165 |     });
-166 | 
-167 |     // For trip listing requests, fetch and format trips
-168 |     if (userInput.toLowerCase().includes('trips') || userInput.toLowerCase().includes('plans')) {
-169 |       const user = await getCurrentUser();
-170 |       if (!user?.id) {
-171 |         throw new Error('No user ID found');
-172 |       }
-173 |       const trips = await getTravelPlans(user.id);
-174 |       const formattedResponse = await formatTravelPlans(trips);
-175 |       
-176 |       // Stream the formatted response word by word
-177 |       const words = formattedResponse.split(/(?<=\s)/);
-178 |       let streamedResponse = '';
-179 |       
-180 |       for (const word of words) {
-181 |         streamedResponse += word;
-182 |         if (onPartialResponse) {
-183 |           onPartialResponse(word);
-184 |           await new Promise(resolve => setTimeout(resolve, 50));
-185 |         }
-186 |       }
-187 |       
-188 |       return formattedResponse;
-189 |     }
-190 | 
-191 |     const result = await chat.sendMessage(userInput);
-192 |     let fullResponse = '';
-193 |     
-194 |     // Handle streaming response
-195 |     const response = await result.response;
-196 |     const chunks = response.text().split(/(?<=\s)/);
-197 |     for (const chunk of chunks) {
-198 |       fullResponse += chunk;
-199 |       
-200 |       // Call the callback with each chunk if provided
-201 |       if (onPartialResponse) {
-202 |         onPartialResponse(chunk);
-203 |         // Add a small delay to simulate natural typing
-204 |         await new Promise(resolve => setTimeout(resolve, 50));
-205 |       }
-206 |     }
-207 |     
-208 |     console.log('Raw response:', fullResponse);
-209 | 
-210 |     // Check for update/deletion request
-211 |     const action = parseTravelPlanAction(fullResponse);
-212 |     if (action?.type === 'delete_all') {
-213 |       try {
-214 |         await deleteAllTravelPlans(userId);
-215 |         const response = "I've deleted all your trips. Ready to plan your next adventure?";
-216 |         if (onPartialResponse) {
-217 |           onPartialResponse(response);
-218 |         }
-219 |         return response;
-220 |       } catch (error) {
-221 |         const errorMsg = `I couldn't delete all trips. ${error instanceof Error ? error.message : 'Please try again.'}`;
-222 |         if (onPartialResponse) {
-223 |           onPartialResponse(errorMsg);
-224 |         }
-225 |         return errorMsg;
-226 |       }
-227 |     } else if (action?.type === 'update') {
-228 |       try {
-229 |         await updateTravelPlan(userId, action.old_trip, action.new_trip);
-230 |         const response = `Perfect! I've updated your trip to ${action.new_trip.destination} for ${action.new_trip.start_date} to ${action.new_trip.end_date}.`;
-231 |         if (onPartialResponse) {
-232 |           onPartialResponse(response);
-233 |         }
-234 |         return response;
-235 |       } catch (error) {
-236 |         const errorMsg = `I couldn't update that trip. ${error instanceof Error ? error.message : 'Please try again.'}`;
-237 |         if (onPartialResponse) {
-238 |           onPartialResponse(errorMsg);
-239 |         }
-240 |         return errorMsg;
-241 |       }
-242 |     } else if (action?.type === 'delete') {
-243 |       try {
-244 |         await deleteTravelPlan(userId, action.destination, action.start_date, action.end_date);
-245 |         const response = `I've deleted your trip to ${action.destination} from ${action.start_date} to ${action.end_date}. Would you like to see your remaining trips?`;
-246 |         if (onPartialResponse) {
-247 |           onPartialResponse(response);
-248 |         }
-249 |         return response;
-250 |       } catch (error) {
-251 |         const errorMsg = `I couldn't delete that trip. ${error instanceof Error ? error.message : 'Please try again.'}`;
-252 |         if (onPartialResponse) {
-253 |           onPartialResponse(errorMsg);
-254 |         }
-255 |         return errorMsg;
-256 |       }
-257 |     }
-258 | 
-259 |     // Try to parse JSON from the response
-260 |     if (fullResponse) {
-261 |       try {
-262 |         console.log('Attempting to parse JSON from:', fullResponse);
-263 |         
-264 |         // Extract JSON block using regex - look for content between ```json and ``` or just {}
-265 |         const jsonMatch = fullResponse.match(/```json\n?([\s\S]*?)\n?```|(\{[\s\S]*\})/);
-266 |         if (!jsonMatch) {
-267 |           console.log('❌ No JSON block found in response');
-268 |           return fullResponse;
-269 |         }
-270 |         
-271 |         // Use the first matching group (between ``` ```) or second group (just {})
-272 |         const jsonString = (jsonMatch[1] || jsonMatch[2]).trim();
-273 |         console.log('Extracted JSON string:', jsonString);
-274 |         
-275 |         const parsed = JSON.parse(jsonString);
-276 |         console.log('Successfully parsed JSON:', parsed);
-277 |         
-278 |         if (parsed.function === 'storeTravelPlan' && parsed.parameters) {
-279 |           console.log('✅ Valid function call detected');
-280 |           console.log('Function name:', parsed.function);
-281 |           console.log('Parameters:', parsed.parameters);
-282 |           
-283 |           const confirmation = await handleStoreTravelPlan(parsed.parameters, userId);
-284 |           console.log('Got confirmation:', confirmation);
-285 |           if (onPartialResponse) {
-286 |             onPartialResponse(confirmation);
-287 |           }
-288 |           return confirmation;
-289 |         } else {
-290 |           console.log('❌ Not a valid function call:', parsed);
-291 |         }
-292 |       } catch (e) {
-293 |         // Not JSON or not in the expected format, just return the response
-294 |         console.log('❌ Failed to parse JSON:', e);
-295 |         console.log('Raw text was:', fullResponse);
-296 |       }
-297 |     } else {
-298 |       console.log('❌ No text in response');
-299 |     }
-300 |     
-301 |     return fullResponse || "I didn't understand that. Could you please try again?";
-302 |   } catch (error) {
-303 |     console.error('Error in getTravelResponse:', error);
-304 |     throw error;
-305 |   }
-306 | };
-307 | 
-308 | export const handleStoreTravelPlan = async (
-309 |   info: TravelPlan,
-310 |   userId: string
-311 | ) => {
-312 |   console.log('\n🔍 HANDLING TRAVEL PLAN');
-313 |   console.log('Current User ID:', userId);
-314 |   console.log('Travel Info:', info);
-315 |   
-316 |   try {
-317 |     console.log('\n=== STORING TRAVEL PLAN ===');
-318 |     console.log('📍 Destination:', info.destination);
-319 |     console.log('📅 Start date:', info.start_date);
-320 |     console.log('📅 End date:', info.end_date);
-321 |     console.log('👤 User ID:', userId);
-322 |     
-323 |     const storedPlan = await createTravelPlan(
-324 |       userId,
-325 |       info.destination,
-326 |       info.start_date,
-327 |       info.end_date
-328 |     );
-329 |     
-330 |     console.log('\n✅ TRAVEL PLAN STORED SUCCESSFULLY');
-331 |     console.log('ID:', storedPlan.id);
-332 |     console.log('User ID:', storedPlan.user_id);
-333 |     console.log('Created at:', storedPlan.created_at);
-334 |     console.log('===========================\n');
-335 |     
-336 |     return `Great! I've saved your trip to ${info.destination} from ${info.start_date} to ${info.end_date}.`;
-337 |   } catch (error) {
-338 |     console.log('\n❌ FAILED TO STORE TRAVEL PLAN');
-339 |     console.log('Error:', error instanceof Error ? error.message : 'Unknown error');
-340 |     console.log('===========================\n');
-341 |     return `I've noted your trip to ${info.destination} from ${info.start_date} to ${info.end_date}, but there was an issue saving it.`;
-342 |   }
-343 | };
-344 | 
-345 | const cleanupSpaces = (text: string): string => {
-346 |   return text.replace(/\s+/g, ' ').trim();
+145 |     const result = await chat.sendMessage(userInput);
+146 |     let fullResponse = '';
+147 |     let visibleResponse = '';
+148 |     let currentFunction = '';
+149 |     
+150 |     // Handle streaming response
+151 |     const response = await result.response;
+152 |     const text = response.text();
+153 |     
+154 |     // Split into chunks, preserving spaces
+155 |     const chunks = text.split(/(?<=\s)/);
+156 |     
+157 |     for (const chunk of chunks) {
+158 |       fullResponse += chunk;
+159 |       
+160 |       // Check if this chunk starts or ends a function call
+161 |       if (chunk.includes('<function>')) {
+162 |         currentFunction = '';
+163 |       } else if (chunk.includes('</function>')) {
+164 |         currentFunction = '';
+165 |       } else if (!currentFunction) {
+166 |         // Only add to visible response if we're not inside a function call
+167 |         visibleResponse += chunk;
+168 |         if (onPartialResponse) {
+169 |           onPartialResponse(chunk);
+170 |           // Add a small delay to simulate natural typing
+171 |           await new Promise(resolve => setTimeout(resolve, 50));
+172 |         }
+173 |       }
+174 |     }
+175 |     
+176 |     console.log('Raw response:', fullResponse);
+177 | 
+178 |     // Check for update/deletion request
+179 |     const action = parseTravelPlanAction(fullResponse);
+180 |     if (action?.type === 'delete_all') {
+181 |       try {
+182 |         await deleteAllTravelPlans(userId);
+183 |         const response = "I've deleted all your trips. Ready to plan your next adventure?";
+184 |         if (onPartialResponse) {
+185 |           onPartialResponse(response);
+186 |         }
+187 |         return response;
+188 |       } catch (error) {
+189 |         const errorMsg = `I couldn't delete all trips. ${error instanceof Error ? error.message : 'Please try again.'}`;
+190 |         if (onPartialResponse) {
+191 |           onPartialResponse(errorMsg);
+192 |         }
+193 |         return errorMsg;
+194 |       }
+195 |     } else if (action?.type === 'update') {
+196 |       try {
+197 |         await updateTravelPlan(userId, action.old_trip, action.new_trip);
+198 |         const response = `Perfect! I've updated your trip to ${action.new_trip.destination} for ${action.new_trip.start_date} to ${action.new_trip.end_date}.`;
+199 |         if (onPartialResponse) {
+200 |           onPartialResponse(response);
+201 |         }
+202 |         return response;
+203 |       } catch (error) {
+204 |         const errorMsg = `I couldn't update that trip. ${error instanceof Error ? error.message : 'Please try again.'}`;
+205 |         if (onPartialResponse) {
+206 |           onPartialResponse(errorMsg);
+207 |         }
+208 |         return errorMsg;
+209 |       }
+210 |     } else if (action?.type === 'delete') {
+211 |       try {
+212 |         await deleteTravelPlan(userId, action.destination, action.start_date, action.end_date);
+213 |         const response = `I've deleted your trip to ${action.destination} from ${action.start_date} to ${action.end_date}. Would you like to see your remaining trips?`;
+214 |         if (onPartialResponse) {
+215 |           onPartialResponse(response);
+216 |         }
+217 |         return response;
+218 |       } catch (error) {
+219 |         const errorMsg = `I couldn't delete that trip. ${error instanceof Error ? error.message : 'Please try again.'}`;
+220 |         if (onPartialResponse) {
+221 |           onPartialResponse(errorMsg);
+222 |         }
+223 |         return errorMsg;
+224 |       }
+225 |     } else if (action?.type === 'store') {
+226 |       try {
+227 |         const confirmation = await handleStoreTravelPlan(action.parameters, userId);
+228 |         if (onPartialResponse) {
+229 |           onPartialResponse(confirmation);
+230 |         }
+231 |         return confirmation;
+232 |       } catch (error) {
+233 |         const errorMsg = `I couldn't save that trip. ${error instanceof Error ? error.message : 'Please try again.'}`;
+234 |         if (onPartialResponse) {
+235 |           onPartialResponse(errorMsg);
+236 |         }
+237 |         return errorMsg;
+238 |       }
+239 |     }
+240 |     
+241 |     // If no action was found, return the visible response
+242 |     return visibleResponse.trim() || "I didn't understand that. Could you please try again?";
+243 |   } catch (error) {
+244 |     console.error('Error in getTravelResponse:', error);
+245 |     throw error;
+246 |   }
+247 | };
+248 | 
+249 | export const handleStoreTravelPlan = async (
+250 |   info: TravelPlan,
+251 |   userId: string
+252 | ) => {
+253 |   console.log('\n🔍 HANDLING TRAVEL PLAN');
+254 |   console.log('Current User ID:', userId);
+255 |   console.log('Travel Info:', info);
+256 |   
+257 |   try {
+258 |     console.log('\n=== STORING TRAVEL PLAN ===');
+259 |     console.log('📍 Destination:', info.destination);
+260 |     console.log('📅 Start date:', info.start_date);
+261 |     console.log('📅 End date:', info.end_date);
+262 |     console.log('👤 User ID:', userId);
+263 |     
+264 |     const storedPlan = await createTravelPlan(
+265 |       userId,
+266 |       info.destination,
+267 |       info.start_date,
+268 |       info.end_date
+269 |     );
+270 |     
+271 |     console.log('\n✅ TRAVEL PLAN STORED SUCCESSFULLY');
+272 |     console.log('ID:', storedPlan.id);
+273 |     console.log('User ID:', storedPlan.user_id);
+274 |     console.log('Created at:', storedPlan.created_at);
+275 |     console.log('===========================\n');
+276 |     
+277 |     return `Great! I've saved your trip to ${info.destination} from ${info.start_date} to ${info.end_date}.`;
+278 |   } catch (error) {
+279 |     console.log('\n❌ FAILED TO STORE TRAVEL PLAN');
+280 |     console.log('Error:', error instanceof Error ? error.message : 'Unknown error');
+281 |     console.log('===========================\n');
+282 |     return `I've noted your trip to ${info.destination} from ${info.start_date} to ${info.end_date}, but there was an issue saving it.`;
+283 |   }
+284 | };
+285 | 
+286 | const cleanupSpaces = (text: string): string => {
+287 |   return text.replace(/\s+/g, ' ').trim();
+288 | };
+289 | 
+290 | export const formatTravelPlans = async (plans: TravelPlan[]) => {
+291 |   if (plans.length === 0) {
+292 |     return "You don't have any trips planned yet. Would you like to plan one?";
+293 |   }
+294 | 
+295 |   // Filter out any invalid trips (those with null or undefined dates)
+296 |   const validPlans = plans.filter(plan => 
+297 |     plan.start_date && 
+298 |     plan.end_date && 
+299 |     plan.start_date !== 'null' && 
+300 |     plan.end_date !== 'null'
+301 |   );
+302 | 
+303 |   // Sort plans chronologically
+304 |   validPlans.sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime());
+305 | 
+306 |   const model = genAI.getGenerativeModel({ 
+307 |     model: MODEL_NAME,
+308 |     generationConfig: {
+309 |       temperature: 0.7,
+310 |       maxOutputTokens: 500,
+311 |     }
+312 |   });
+313 | 
+314 |   const prompt = `List the user's travel plans clearly and directly. This is in response to them checking their trips.
+315 | 
+316 | Current trips (${validPlans.length} total):
+317 | ${validPlans.map(plan => `- ${plan.destination} from ${plan.start_date} to ${plan.end_date}`).join('\n')}
+318 | 
+319 | Guidelines:
+320 | - Start with "You have ${validPlans.length === 1 ? 'one trip' : validPlans.length + ' trips'} booked:"
+321 | - List trips chronologically (they are already sorted)
+322 | - Format dates naturally (like "mid-March" or "late October")
+323 | - Be clear and direct about what's actually booked
+324 | - Don't mention invalid or incomplete trips
+325 | - Don't ask questions about planning more trips
+326 | - Don't speculate about potential future trips
+327 | - Keep it factual but warm
+328 | - Avoid double spaces between words
+329 | 
+330 | Example good responses:
+331 | For multiple trips:
+332 | "You have 3 trips booked: Athens from March 15th to 22nd, Cologne from September 5th to 7th, and Rome from November 1st to 7th. All set!"
+333 | 
+334 | For one trip:
+335 | "You have one trip booked: Athens from March 15th to 22nd. The spring weather should be lovely!"
+336 | 
+337 | Remember: Only mention valid, confirmed trips with actual dates. Use single spaces between words.`;
+338 | 
+339 |   try {
+340 |     const result = await model.generateContent(prompt);
+341 |     const response = await result.response;
+342 |     return cleanupSpaces(response.text() || "Error formatting your trips.");
+343 |   } catch (error) {
+344 |     console.error('Error formatting travel plans:', error);
+345 |     return "Sorry, I couldn't retrieve your trips right now.";
+346 |   }
 347 | };
-348 | 
-349 | export const formatTravelPlans = async (plans: TravelPlan[]) => {
-350 |   if (plans.length === 0) {
-351 |     return "You don't have any trips planned yet. Would you like to plan one?";
-352 |   }
-353 | 
-354 |   // Filter out any invalid trips (those with null or undefined dates)
-355 |   const validPlans = plans.filter(plan => 
-356 |     plan.start_date && 
-357 |     plan.end_date && 
-358 |     plan.start_date !== 'null' && 
-359 |     plan.end_date !== 'null'
-360 |   );
-361 | 
-362 |   // Sort plans chronologically
-363 |   validPlans.sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime());
-364 | 
-365 |   const model = genAI.getGenerativeModel({ 
-366 |     model: MODEL_NAME,
-367 |     generationConfig: {
-368 |       temperature: 0.7,
-369 |       maxOutputTokens: 500,
-370 |     }
-371 |   });
-372 | 
-373 |   const prompt = `List the user's travel plans clearly and directly. This is in response to them checking their trips.
-374 | 
-375 | Current trips (${validPlans.length} total):
-376 | ${validPlans.map(plan => `- ${plan.destination} from ${plan.start_date} to ${plan.end_date}`).join('\n')}
-377 | 
-378 | Guidelines:
-379 | - Start with "You have ${validPlans.length === 1 ? 'one trip' : validPlans.length + ' trips'} booked:"
-380 | - List trips chronologically (they are already sorted)
-381 | - Format dates naturally (like "mid-March" or "late October")
-382 | - Be clear and direct about what's actually booked
-383 | - Don't mention invalid or incomplete trips
-384 | - Don't ask questions about planning more trips
-385 | - Don't speculate about potential future trips
-386 | - Keep it factual but warm
-387 | - Avoid double spaces between words
-388 | 
-389 | Example good responses:
-390 | For multiple trips:
-391 | "You have 3 trips booked: Athens from March 15th to 22nd, Cologne from September 5th to 7th, and Rome from November 1st to 7th. All set!"
-392 | 
-393 | For one trip:
-394 | "You have one trip booked: Athens from March 15th to 22nd. The spring weather should be lovely!"
-395 | 
-396 | Remember: Only mention valid, confirmed trips with actual dates. Use single spaces between words.`;
-397 | 
-398 |   try {
-399 |     const result = await model.generateContent(prompt);
-400 |     const response = await result.response;
-401 |     return cleanupSpaces(response.text() || "Error formatting your trips.");
-402 |   } catch (error) {
-403 |     console.error('Error formatting travel plans:', error);
-404 |     return "Sorry, I couldn't retrieve your trips right now.";
-405 |   }
-406 | };
 ```
 
 app/lib/supabase/client.ts
 ```
 1 | // Path: app/lib/supabase/client.ts
 2 | import { createBrowserClient } from '@supabase/ssr';
-3 | 
-4 | export const supabase = createBrowserClient(
-5 |   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-6 |   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-7 | );
-8 | 
-9 | export const signInWithGoogle = async () => {
-10 |   const { error } = await supabase.auth.signInWithOAuth({
-11 |     provider: 'google',
-12 |     options: {
-13 |       redirectTo: `${window.location.origin}/auth/callback`,
-14 |     },
-15 |   });
-16 | 
-17 |   if (error) {
-18 |     console.error('Error signing in:', error.message);
-19 |     throw error;
-20 |   }
-21 | };
-22 | 
-23 | export const getCurrentUser = async () => {
-24 |   try {
-25 |     const { data: { user }, error } = await supabase.auth.getUser();
-26 |     if (error) throw error;
-27 |     return user;
-28 |   } catch (error) {
-29 |     console.error('Error getting user:', error);
-30 |     throw error;
-31 |   }
-32 | };
-33 | 
-34 | export const checkUserTrips = async () => {
-35 |   try {
-36 |     console.log('\n=== CHECKING USER INFO ===');
-37 |     const user = await getCurrentUser();
-38 |     
-39 |     if (!user) {
-40 |       const error = 'No user logged in - please sign in first';
-41 |       console.error('❌', error);
-42 |       throw new Error(error);
-43 |     }
-44 | 
-45 |     console.log('✅ User found:');
-46 |     console.log('User ID:', user.id);
-47 |     console.log('Email:', user.email);
-48 |     console.log('===============================\n');
-49 |     
-50 |     const trips = await getTravelPlans(user.id);
-51 |     
-52 |     if (!trips || trips.length === 0) {
-53 |       console.log('ℹ️ No trips found for this user');
-54 |       return [];
-55 |     }
-56 |     
-57 |     console.log('✅ Found', trips.length, 'trips:');
-58 |     trips.forEach((trip, index) => {
-59 |       console.log(`\nTrip ${index + 1}:`);
-60 |       console.log('🌍 Destination:', trip.destination);
-61 |       console.log('📅 Start:', trip.start_date);
-62 |       console.log('📅 End:', trip.end_date);
-63 |     });
-64 |     
-65 |     return trips;
-66 |   } catch (error) {
-67 |     console.error('\n❌ ERROR IN checkUserTrips');
-68 |     if (error instanceof Error) {
-69 |       console.error('Message:', error.message);
-70 |     } else {
-71 |       console.error('Unknown error:', error);
+3 | import { getBaseUrl } from '../utils/url';
+4 | 
+5 | export const supabase = createBrowserClient(
+6 |   process.env.NEXT_PUBLIC_SUPABASE_URL!,
+7 |   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+8 | );
+9 | 
+10 | export const signInWithGoogle = async () => {
+11 |   try {
+12 |     console.log('Starting Google sign-in...');
+13 |     const redirectUrl = `${getBaseUrl()}/auth/callback`;
+14 |     console.log('Redirect URL:', redirectUrl);
+15 |     
+16 |     const { data, error } = await supabase.auth.signInWithOAuth({
+17 |       provider: 'google',
+18 |       options: {
+19 |         redirectTo: redirectUrl,
+20 |         queryParams: {
+21 |           access_type: 'offline',
+22 |           prompt: 'consent',
+23 |         },
+24 |       },
+25 |     });
+26 | 
+27 |     if (error) {
+28 |       console.error('Error signing in:', error.message);
+29 |       throw error;
+30 |     }
+31 | 
+32 |     console.log('Sign-in initiated:', data);
+33 |     return data;
+34 |   } catch (error) {
+35 |     console.error('Error in signInWithGoogle:', error);
+36 |     throw error;
+37 |   }
+38 | };
+39 | 
+40 | export const getCurrentUser = async () => {
+41 |   try {
+42 |     const { data: { user }, error } = await supabase.auth.getUser();
+43 |     if (error) throw error;
+44 |     return user;
+45 |   } catch (error) {
+46 |     console.error('Error getting user:', error);
+47 |     throw error;
+48 |   }
+49 | };
+50 | 
+51 | export const checkUserTrips = async () => {
+52 |   try {
+53 |     console.log('\n=== CHECKING USER INFO ===');
+54 |     const user = await getCurrentUser();
+55 |     
+56 |     if (!user) {
+57 |       const error = 'No user logged in - please sign in first';
+58 |       console.error('❌', error);
+59 |       throw new Error(error);
+60 |     }
+61 | 
+62 |     console.log('✅ User found:');
+63 |     console.log('User ID:', user.id);
+64 |     console.log('Email:', user.email);
+65 |     console.log('===============================\n');
+66 |     
+67 |     const trips = await getTravelPlans(user.id);
+68 |     
+69 |     if (!trips || trips.length === 0) {
+70 |       console.log('ℹ️ No trips found for this user');
+71 |       return [];
 72 |     }
-73 |     console.error('===============================\n');
-74 |     throw error;
-75 |   }
-76 | };
-77 | 
-78 | export interface TravelPlan {
-79 |   id: string;
-80 |   user_id: string;
-81 |   destination: string;
-82 |   start_date: string;
-83 |   end_date: string;
-84 |   created_at: string;
-85 | }
-86 | 
-87 | export const getTravelPlans = async (userId: string) => {
-88 |   try {
-89 |     console.log('\n=== FETCHING TRAVEL PLANS ===');
-90 |     console.log('User ID:', userId);
-91 | 
-92 |     const { data, error } = await supabase
-93 |       .from('travel_plans')
-94 |       .select('*')
-95 |       .eq('user_id', userId)
-96 |       .order('created_at', { ascending: false });
-97 | 
-98 |     if (error) {
-99 |       console.error('\n❌ ERROR FETCHING TRAVEL PLANS');
-100 |       console.error('Message:', error.message);
-101 |       console.error('Details:', error.details);
-102 |       throw error;
-103 |     }
-104 | 
-105 |     console.log('\n✅ TRAVEL PLANS FETCHED');
-106 |     console.log('Number of plans:', data?.length);
-107 |     console.log('Plans:', data);
-108 |     console.log('===============================\n');
-109 | 
-110 |     return data;
-111 |   } catch (error) {
-112 |     console.error('\n❌ UNEXPECTED ERROR');
-113 |     console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
-114 |     console.error('===============================\n');
-115 |     throw error;
-116 |   }
-117 | };
-118 | 
-119 | export const createTravelPlan = async (userId: string, destination: string, startDate: string, endDate: string) => {
-120 |   try {
-121 |     console.log('\n=== CREATING TRAVEL PLAN IN SUPABASE ===');
-122 |     console.log('User ID:', userId);
-123 |     console.log('Destination:', destination);
-124 |     console.log('Start Date:', startDate);
-125 |     console.log('End Date:', endDate);
+73 |     
+74 |     console.log('✅ Found', trips.length, 'trips:');
+75 |     trips.forEach((trip, index) => {
+76 |       console.log(`\nTrip ${index + 1}:`);
+77 |       console.log('🌍 Destination:', trip.destination);
+78 |       console.log('📅 Start:', trip.start_date);
+79 |       console.log('📅 End:', trip.end_date);
+80 |     });
+81 |     
+82 |     return trips;
+83 |   } catch (error) {
+84 |     console.error('\n❌ ERROR IN checkUserTrips');
+85 |     if (error instanceof Error) {
+86 |       console.error('Message:', error.message);
+87 |     } else {
+88 |       console.error('Unknown error:', error);
+89 |     }
+90 |     console.error('===============================\n');
+91 |     throw error;
+92 |   }
+93 | };
+94 | 
+95 | export interface TravelPlan {
+96 |   id: string;
+97 |   user_id: string;
+98 |   destination: string;
+99 |   start_date: string;
+100 |   end_date: string;
+101 |   created_at: string;
+102 | }
+103 | 
+104 | export const getTravelPlans = async (userId: string) => {
+105 |   try {
+106 |     console.log('\n=== FETCHING TRAVEL PLANS ===');
+107 |     console.log('User ID:', userId);
+108 | 
+109 |     const { data, error } = await supabase
+110 |       .from('travel_plans')
+111 |       .select('*')
+112 |       .eq('user_id', userId)
+113 |       .order('created_at', { ascending: false });
+114 | 
+115 |     if (error) {
+116 |       console.error('\n❌ ERROR FETCHING TRAVEL PLANS');
+117 |       console.error('Message:', error.message);
+118 |       console.error('Details:', error.details);
+119 |       throw error;
+120 |     }
+121 | 
+122 |     console.log('\n✅ TRAVEL PLANS FETCHED');
+123 |     console.log('Number of plans:', data?.length);
+124 |     console.log('Plans:', data);
+125 |     console.log('===============================\n');
 126 | 
-127 |     const { data, error } = await supabase
-128 |       .from('travel_plans')
-129 |       .insert([
-130 |         {
-131 |           user_id: userId,
-132 |           destination: destination.toLowerCase(),
-133 |           start_date: startDate,
-134 |           end_date: endDate,
-135 |         },
-136 |       ])
-137 |       .select()
-138 |       .single();
-139 | 
-140 |     if (error) {
-141 |       console.error('\n❌ SUPABASE ERROR');
-142 |       console.error('Message:', error.message);
-143 |       console.error('Details:', error.details);
-144 |       console.error('Hint:', error.hint);
-145 |       console.error('Code:', error.code);
-146 |       throw error;
-147 |     }
-148 | 
-149 |     console.log('\n✅ TRAVEL PLAN CREATED');
-150 |     console.log('Stored Data:', data);
-151 |     console.log('===============================\n');
-152 | 
-153 |     // Fetch and log all travel plans after creating a new one
-154 |     await getTravelPlans(userId);
-155 | 
-156 |     return data;
-157 |   } catch (error) {
-158 |     console.error('\n❌ UNEXPECTED ERROR');
-159 |     console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
-160 |     console.error('===============================\n');
-161 |     throw error;
-162 |   }
-163 | };
-164 | 
-165 | export const deleteTravelPlan = async (userId: string, destination: string, start_date: string, end_date: string) => {
-166 |   console.log('\n=== DELETING TRAVEL PLAN ===');
-167 |   console.log('User ID:', userId);
-168 |   console.log('Destination:', destination);
-169 |   console.log('Start Date:', start_date);
-170 |   console.log('End Date:', end_date);
-171 | 
-172 |   try {
-173 |     const { data, error } = await supabase
-174 |       .from('travel_plans')
-175 |       .delete()
-176 |       .match({
-177 |         user_id: userId,
-178 |         destination: destination.toLowerCase(),
-179 |         start_date,
-180 |         end_date
-181 |       })
-182 |       .select();
-183 | 
-184 |     if (error) throw error;
-185 | 
-186 |     console.log('\n✅ TRAVEL PLAN DELETED');
-187 |     console.log('Deleted Data:', data);
-188 |     console.log('===========================\n');
-189 |     
-190 |     return data;
-191 |   } catch (error) {
-192 |     console.log('\n❌ FAILED TO DELETE TRAVEL PLAN');
-193 |     console.log('Error:', error instanceof Error ? error.message : 'Unknown error');
-194 |     console.log('===========================\n');
-195 |     throw error;
-196 |   }
-197 | };
-198 | 
-199 | export const updateTravelPlan = async (
-200 |   userId: string,
-201 |   oldTrip: { destination: string; start_date: string; end_date: string },
-202 |   newTrip: { destination: string; start_date: string; end_date: string }
-203 | ) => {
-204 |   try {
-205 |     console.log('\n=== UPDATING TRAVEL PLAN ===');
-206 |     console.log('User ID:', userId);
-207 |     console.log('Old trip:', oldTrip);
-208 |     console.log('New trip:', newTrip);
-209 | 
-210 |     // Delete the old trip
-211 |     const { error: deleteError } = await supabase
-212 |       .from('travel_plans')
-213 |       .delete()
-214 |       .match({
-215 |         user_id: userId,
-216 |         destination: oldTrip.destination.toLowerCase(),
-217 |         start_date: oldTrip.start_date,
-218 |         end_date: oldTrip.end_date
-219 |       });
-220 | 
-221 |     if (deleteError) throw deleteError;
-222 | 
-223 |     // Create the new trip
-224 |     const { data, error: insertError } = await supabase
-225 |       .from('travel_plans')
-226 |       .insert([
-227 |         {
-228 |           user_id: userId,
-229 |           destination: newTrip.destination.toLowerCase(),
-230 |           start_date: newTrip.start_date,
-231 |           end_date: newTrip.end_date,
-232 |         },
-233 |       ])
-234 |       .select()
-235 |       .single();
-236 | 
-237 |     if (insertError) throw insertError;
-238 | 
-239 |     console.log('\n✅ TRAVEL PLAN UPDATED');
-240 |     console.log('Updated Data:', data);
-241 |     console.log('===========================\n');
-242 | 
-243 |     return data;
-244 |   } catch (error) {
-245 |     console.error('\n❌ FAILED TO UPDATE TRAVEL PLAN');
-246 |     console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
-247 |     console.error('===========================\n');
-248 |     throw error;
-249 |   }
-250 | };
-251 | 
-252 | export const deleteAllTravelPlans = async (userId: string) => {
-253 |   console.log('\n=== DELETING ALL TRAVEL PLANS ===');
-254 |   console.log('User ID:', userId);
+127 |     return data;
+128 |   } catch (error) {
+129 |     console.error('\n❌ UNEXPECTED ERROR');
+130 |     console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
+131 |     console.error('===============================\n');
+132 |     throw error;
+133 |   }
+134 | };
+135 | 
+136 | export const createTravelPlan = async (userId: string, destination: string, startDate: string, endDate: string) => {
+137 |   try {
+138 |     console.log('\n=== CREATING TRAVEL PLAN IN SUPABASE ===');
+139 |     console.log('User ID:', userId);
+140 |     console.log('Destination:', destination);
+141 |     console.log('Start Date:', startDate);
+142 |     console.log('End Date:', endDate);
+143 | 
+144 |     const { data, error } = await supabase
+145 |       .from('travel_plans')
+146 |       .insert([
+147 |         {
+148 |           user_id: userId,
+149 |           destination: destination.toLowerCase(),
+150 |           start_date: startDate,
+151 |           end_date: endDate,
+152 |         },
+153 |       ])
+154 |       .select()
+155 |       .single();
+156 | 
+157 |     if (error) {
+158 |       console.error('\n❌ SUPABASE ERROR');
+159 |       console.error('Message:', error.message);
+160 |       console.error('Details:', error.details);
+161 |       console.error('Hint:', error.hint);
+162 |       console.error('Code:', error.code);
+163 |       throw error;
+164 |     }
+165 | 
+166 |     console.log('\n✅ TRAVEL PLAN CREATED');
+167 |     console.log('Stored Data:', data);
+168 |     console.log('===============================\n');
+169 | 
+170 |     // Fetch and log all travel plans after creating a new one
+171 |     await getTravelPlans(userId);
+172 | 
+173 |     return data;
+174 |   } catch (error) {
+175 |     console.error('\n❌ UNEXPECTED ERROR');
+176 |     console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
+177 |     console.error('===============================\n');
+178 |     throw error;
+179 |   }
+180 | };
+181 | 
+182 | export const deleteTravelPlan = async (userId: string, destination: string, start_date: string, end_date: string) => {
+183 |   console.log('\n=== DELETING TRAVEL PLAN ===');
+184 |   console.log('User ID:', userId);
+185 |   console.log('Destination:', destination);
+186 |   console.log('Start Date:', start_date);
+187 |   console.log('End Date:', end_date);
+188 | 
+189 |   try {
+190 |     const { data, error } = await supabase
+191 |       .from('travel_plans')
+192 |       .delete()
+193 |       .match({
+194 |         user_id: userId,
+195 |         destination: destination.toLowerCase(),
+196 |         start_date,
+197 |         end_date
+198 |       })
+199 |       .select();
+200 | 
+201 |     if (error) throw error;
+202 | 
+203 |     console.log('\n✅ TRAVEL PLAN DELETED');
+204 |     console.log('Deleted Data:', data);
+205 |     console.log('===========================\n');
+206 |     
+207 |     return data;
+208 |   } catch (error) {
+209 |     console.log('\n❌ FAILED TO DELETE TRAVEL PLAN');
+210 |     console.log('Error:', error instanceof Error ? error.message : 'Unknown error');
+211 |     console.log('===========================\n');
+212 |     throw error;
+213 |   }
+214 | };
+215 | 
+216 | export const updateTravelPlan = async (
+217 |   userId: string,
+218 |   oldTrip: { destination: string; start_date: string; end_date: string },
+219 |   newTrip: { destination: string; start_date: string; end_date: string }
+220 | ) => {
+221 |   try {
+222 |     console.log('\n=== UPDATING TRAVEL PLAN ===');
+223 |     console.log('User ID:', userId);
+224 |     console.log('Old trip:', oldTrip);
+225 |     console.log('New trip:', newTrip);
+226 | 
+227 |     // Delete the old trip
+228 |     const { error: deleteError } = await supabase
+229 |       .from('travel_plans')
+230 |       .delete()
+231 |       .match({
+232 |         user_id: userId,
+233 |         destination: oldTrip.destination.toLowerCase(),
+234 |         start_date: oldTrip.start_date,
+235 |         end_date: oldTrip.end_date
+236 |       });
+237 | 
+238 |     if (deleteError) throw deleteError;
+239 | 
+240 |     // Create the new trip
+241 |     const { data, error: insertError } = await supabase
+242 |       .from('travel_plans')
+243 |       .insert([
+244 |         {
+245 |           user_id: userId,
+246 |           destination: newTrip.destination.toLowerCase(),
+247 |           start_date: newTrip.start_date,
+248 |           end_date: newTrip.end_date,
+249 |         },
+250 |       ])
+251 |       .select()
+252 |       .single();
+253 | 
+254 |     if (insertError) throw insertError;
 255 | 
-256 |   try {
-257 |     const { data, error } = await supabase
-258 |       .from('travel_plans')
-259 |       .delete()
-260 |       .eq('user_id', userId)
-261 |       .select();
-262 | 
-263 |     if (error) throw error;
-264 | 
-265 |     console.log('\n✅ ALL TRAVEL PLANS DELETED');
-266 |     console.log('Number of trips deleted:', data?.length);
-267 |     console.log('===========================\n');
-268 |     
-269 |     return data;
-270 |   } catch (error) {
-271 |     console.log('\n❌ FAILED TO DELETE ALL TRAVEL PLANS');
-272 |     console.log('Error:', error instanceof Error ? error.message : 'Unknown error');
-273 |     console.log('===========================\n');
-274 |     throw error;
-275 |   }
-276 | };
+256 |     console.log('\n✅ TRAVEL PLAN UPDATED');
+257 |     console.log('Updated Data:', data);
+258 |     console.log('===========================\n');
+259 | 
+260 |     return data;
+261 |   } catch (error) {
+262 |     console.error('\n❌ FAILED TO UPDATE TRAVEL PLAN');
+263 |     console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
+264 |     console.error('===========================\n');
+265 |     throw error;
+266 |   }
+267 | };
+268 | 
+269 | export const deleteAllTravelPlans = async (userId: string) => {
+270 |   console.log('\n=== DELETING ALL TRAVEL PLANS ===');
+271 |   console.log('User ID:', userId);
+272 | 
+273 |   try {
+274 |     const { data, error } = await supabase
+275 |       .from('travel_plans')
+276 |       .delete()
+277 |       .eq('user_id', userId)
+278 |       .select();
+279 | 
+280 |     if (error) throw error;
+281 | 
+282 |     console.log('\n✅ ALL TRAVEL PLANS DELETED');
+283 |     console.log('Number of trips deleted:', data?.length);
+284 |     console.log('===========================\n');
+285 |     
+286 |     return data;
+287 |   } catch (error) {
+288 |     console.log('\n❌ FAILED TO DELETE ALL TRAVEL PLANS');
+289 |     console.log('Error:', error instanceof Error ? error.message : 'Unknown error');
+290 |     console.log('===========================\n');
+291 |     throw error;
+292 |   }
+293 | };
+```
+
+app/lib/utils/url.ts
+```
+1 | export const getBaseUrl = () => {
+2 |   // Production URL takes precedence
+3 |   if (process.env.NEXT_PUBLIC_BASE_URL) {
+4 |     return process.env.NEXT_PUBLIC_BASE_URL;
+5 |   }
+6 | 
+7 |   if (typeof window !== 'undefined') {
+8 |     // Client-side
+9 |     return window.location.origin;
+10 |   }
+11 | 
+12 |   // Server-side
+13 |   if (process.env.VERCEL_URL) {
+14 |     return `https://${process.env.VERCEL_URL}`;
+15 |   }
+16 | 
+17 |   return 'http://localhost:3000';
+18 | }; 
 ```
 
 app/login/page.tsx
@@ -1234,36 +1259,87 @@ app/login/page.tsx
 1 | 'use client';
 2 | 
 3 | import { signInWithGoogle } from '../lib/supabase/client';
-4 | 
-5 | export default function LoginPage() {
-6 |   return (
-7 |     <div className="min-h-screen flex items-center justify-center bg-[#343541]">
-8 |       <div className="max-w-md w-full space-y-8 p-8">
-9 |         <div>
-10 |           <h1 className="text-7xl font-extrabold text-gray-200 tracking-tight font-sans text-center">
-11 |             Yondo
-12 |           </h1>
-13 |           <p className="mt-4 text-center text-gray-400">
-14 |             Your AI travel companion
-15 |           </p>
-16 |         </div>
-17 |         <div>
-18 |           <button
-19 |             onClick={signInWithGoogle}
-20 |             className="w-full flex justify-center py-4 px-4 border border-gray-600/50 text-base font-medium rounded-xl text-gray-200 bg-[#3a3b42] hover:bg-[#40414F] focus:outline-none transition-colors"
-21 |           >
-22 |             <span className="flex items-center">
-23 |               <svg className="h-5 w-5 mr-3" viewBox="0 0 24 24" fill="currentColor">
-24 |                 <path d="M12.545,12.151L12.545,12.151c0,1.054,0.855,1.909,1.909,1.909h3.536c-0.367,1.332-1.459,2.379-2.799,2.379h-2.545c-1.39,0-2.545-1.155-2.545-2.545v-2.545c0-1.39,1.155-2.545,2.545-2.545h2.545c1.34,0,2.432,1.047,2.799,2.379h-3.536C13.4,10.242,12.545,11.097,12.545,12.151z" />
-25 |               </svg>
-26 |               Sign in with Google
-27 |             </span>
-28 |           </button>
-29 |         </div>
-30 |       </div>
-31 |     </div>
-32 |   );
-33 | } 
+4 | import { useState, useEffect } from 'react';
+5 | import { useRouter } from 'next/navigation';
+6 | import { supabase } from '../lib/supabase/client';
+7 | 
+8 | export default function LoginPage() {
+9 |   const [isLoading, setIsLoading] = useState(false);
+10 |   const [error, setError] = useState<string | null>(null);
+11 |   const router = useRouter();
+12 | 
+13 |   useEffect(() => {
+14 |     // Check if we're already logged in
+15 |     const checkSession = async () => {
+16 |       const { data: { session } } = await supabase.auth.getSession();
+17 |       console.log('Current session:', session);
+18 |       if (session) {
+19 |         console.log('User is already logged in, redirecting to home');
+20 |         router.replace('/');
+21 |       }
+22 |     };
+23 |     
+24 |     checkSession();
+25 |   }, [router]);
+26 | 
+27 |   const handleSignIn = async () => {
+28 |     try {
+29 |       console.log('Login button clicked');
+30 |       setIsLoading(true);
+31 |       setError(null);
+32 |       
+33 |       const result = await signInWithGoogle();
+34 |       console.log('Sign-in result:', result);
+35 |       
+36 |     } catch (err) {
+37 |       console.error('Sign in error:', err);
+38 |       setError(err instanceof Error ? err.message : 'Failed to sign in');
+39 |     } finally {
+40 |       setIsLoading(false);
+41 |     }
+42 |   };
+43 | 
+44 |   return (
+45 |     <div className="min-h-screen flex items-center justify-center bg-[#343541]">
+46 |       <div className="max-w-md w-full space-y-8 p-8">
+47 |         <div>
+48 |           <h1 className="text-7xl font-extrabold text-gray-200 tracking-tight font-sans text-center">
+49 |             Yondo
+50 |           </h1>
+51 |           <p className="mt-4 text-center text-gray-400">
+52 |             Your AI travel companion
+53 |           </p>
+54 |         </div>
+55 |         <div className="space-y-4">
+56 |           <button
+57 |             onClick={handleSignIn}
+58 |             disabled={isLoading}
+59 |             className="w-full flex justify-center py-4 px-4 border border-gray-600/50 text-base font-medium rounded-xl text-gray-200 bg-[#3a3b42] hover:bg-[#40414F] focus:outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+60 |           >
+61 |             <span className="flex items-center">
+62 |               {isLoading ? (
+63 |                 <svg className="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24">
+64 |                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+65 |                   <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+66 |                 </svg>
+67 |               ) : (
+68 |                 <svg className="h-5 w-5 mr-3" viewBox="0 0 24 24" fill="currentColor">
+69 |                   <path d="M12.545,12.151L12.545,12.151c0,1.054,0.855,1.909,1.909,1.909h3.536c-0.367,1.332-1.459,2.379-2.799,2.379h-2.545c-1.39,0-2.545-1.155-2.545-2.545v-2.545c0-1.39,1.155-2.545,2.545-2.545h2.545c1.34,0,2.432,1.047,2.799,2.379h-3.536C13.4,10.242,12.545,11.097,12.545,12.151z" />
+70 |                 </svg>
+71 |               )}
+72 |               {isLoading ? 'Signing in...' : 'Sign in with Google'}
+73 |             </span>
+74 |           </button>
+75 |           {error && (
+76 |             <p className="text-red-500 text-sm text-center mt-2">
+77 |               {error}
+78 |             </p>
+79 |           )}
+80 |         </div>
+81 |       </div>
+82 |     </div>
+83 |   );
+84 | } 
 ```
 
 app/page.tsx
@@ -1301,80 +1377,91 @@ middleware.ts
 1 | import { createServerClient } from '@supabase/ssr';
 2 | import { NextResponse } from 'next/server';
 3 | import type { NextRequest } from 'next/server';
-4 | 
-5 | export async function middleware(request: NextRequest) {
-6 |   let response = NextResponse.next({
-7 |     request: {
-8 |       headers: request.headers,
-9 |     },
-10 |   });
-11 | 
-12 |   const supabase = createServerClient(
-13 |     process.env.NEXT_PUBLIC_SUPABASE_URL!,
-14 |     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-15 |     {
-16 |       cookies: {
-17 |         get(name: string) {
-18 |           return request.cookies.get(name)?.value;
-19 |         },
-20 |         set(name: string, value: string, options: any) {
-21 |           request.cookies.set({
-22 |             name,
-23 |             value,
-24 |             ...options,
-25 |           });
-26 |           response = NextResponse.next({
-27 |             request: {
-28 |               headers: request.headers,
-29 |             },
-30 |           });
-31 |           response.cookies.set({
-32 |             name,
-33 |             value,
-34 |             ...options,
-35 |           });
-36 |         },
-37 |         remove(name: string, options: any) {
-38 |           request.cookies.set({
-39 |             name,
-40 |             value: '',
-41 |             ...options,
-42 |           });
-43 |           response = NextResponse.next({
-44 |             request: {
-45 |               headers: request.headers,
-46 |             },
-47 |           });
-48 |           response.cookies.set({
-49 |             name,
-50 |             value: '',
-51 |             ...options,
-52 |           });
-53 |         },
-54 |       },
-55 |     }
-56 |   );
-57 | 
-58 |   const { data: { user } } = await supabase.auth.getUser();
-59 | 
-60 |   // If user is not signed in and the current path is not /login or /auth/callback,
-61 |   // redirect the user to /login
-62 |   if (!user && !request.nextUrl.pathname.startsWith('/login') && !request.nextUrl.pathname.startsWith('/auth/callback')) {
-63 |     return NextResponse.redirect(new URL('/login', request.url));
-64 |   }
-65 | 
-66 |   // If user is signed in and the current path is /login,
-67 |   // redirect the user to /
-68 |   if (user && request.nextUrl.pathname.startsWith('/login')) {
-69 |     return NextResponse.redirect(new URL('/', request.url));
-70 |   }
-71 | 
-72 |   return response;
-73 | }
-74 | 
-75 | export const config = {
-76 |   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
-77 | }; 
+4 | import { getBaseUrl } from './app/lib/utils/url';
+5 | 
+6 | export async function middleware(request: NextRequest) {
+7 |   let response = NextResponse.next({
+8 |     request: {
+9 |       headers: request.headers,
+10 |     },
+11 |   });
+12 | 
+13 |   const supabase = createServerClient(
+14 |     process.env.NEXT_PUBLIC_SUPABASE_URL!,
+15 |     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+16 |     {
+17 |       cookies: {
+18 |         get(name: string) {
+19 |           return request.cookies.get(name)?.value;
+20 |         },
+21 |         set(name: string, value: string, options: any) {
+22 |           request.cookies.set({
+23 |             name,
+24 |             value,
+25 |             ...options,
+26 |           });
+27 |           response = NextResponse.next({
+28 |             request: {
+29 |               headers: request.headers,
+30 |             },
+31 |           });
+32 |           response.cookies.set({
+33 |             name,
+34 |             value,
+35 |             ...options,
+36 |           });
+37 |         },
+38 |         remove(name: string, options: any) {
+39 |           request.cookies.set({
+40 |             name,
+41 |             value: '',
+42 |             ...options,
+43 |           });
+44 |           response = NextResponse.next({
+45 |             request: {
+46 |               headers: request.headers,
+47 |             },
+48 |           });
+49 |           response.cookies.set({
+50 |             name,
+51 |             value: '',
+52 |             ...options,
+53 |           });
+54 |         },
+55 |       },
+56 |     }
+57 |   );
+58 | 
+59 |   const { data: { user } } = await supabase.auth.getUser();
+60 | 
+61 |   // If user is not signed in and the current path is not /login or /auth/callback,
+62 |   // redirect the user to /login
+63 |   if (!user && !request.nextUrl.pathname.startsWith('/login') && !request.nextUrl.pathname.startsWith('/auth/callback')) {
+64 |     return NextResponse.redirect(new URL('/login', getBaseUrl()));
+65 |   }
+66 | 
+67 |   // If user is signed in and the current path is /login,
+68 |   // redirect the user to /
+69 |   if (user && request.nextUrl.pathname.startsWith('/login')) {
+70 |     return NextResponse.redirect(new URL('/', getBaseUrl()));
+71 |   }
+72 | 
+73 |   return response;
+74 | }
+75 | 
+76 | export const config = {
+77 |   matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+78 | }; 
+```
+
+next.config.mjs
+```
+1 | /** @type {import('next').NextConfig} */
+2 | const nextConfig = {
+3 |   reactStrictMode: true,
+4 | }
+5 | 
+6 | export default nextConfig; 
 ```
 
 next.config.ts
@@ -1415,19 +1502,19 @@ package.json
 22 |     "date-fns": "^4.1.0",
 23 |     "lucide-react": "^0.471.2",
 24 |     "next": "15.1.4",
-25 |     "openai": "^4.78.1",
-26 |     "react": "^19.0.0",
-27 |     "react-dom": "^19.0.0",
-28 |     "tailwind-merge": "^2.6.0",
-29 |     "tailwindcss-animate": "^1.0.7",
-30 |     "uuid": "^11.0.5"
-31 |   },
-32 |   "devDependencies": {
-33 |     "@eslint/eslintrc": "^3",
-34 |     "@types/node": "^20",
-35 |     "@types/react": "^19",
-36 |     "@types/react-dom": "^19",
-37 |     "eslint": "^9",
+25 |     "react": "^19.0.0",
+26 |     "react-dom": "^19.0.0",
+27 |     "tailwind-merge": "^2.6.0",
+28 |     "tailwindcss-animate": "^1.0.7",
+29 |     "uuid": "^11.0.5"
+30 |   },
+31 |   "devDependencies": {
+32 |     "@eslint/eslintrc": "^3.0.0",
+33 |     "@types/node": "^20",
+34 |     "@types/react": "^19",
+35 |     "@types/react-dom": "^19",
+36 |     "autoprefixer": "^10.0.1",
+37 |     "eslint": "^8.0.0",
 38 |     "eslint-config-next": "15.1.4",
 39 |     "postcss": "^8",
 40 |     "tailwindcss": "^3.4.1",
