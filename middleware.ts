@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { getBaseUrl } from './app/lib/utils/url';
 
 export async function middleware(request: NextRequest) {
   let response = NextResponse.next({
@@ -60,13 +61,13 @@ export async function middleware(request: NextRequest) {
   // If user is not signed in and the current path is not /login or /auth/callback,
   // redirect the user to /login
   if (!user && !request.nextUrl.pathname.startsWith('/login') && !request.nextUrl.pathname.startsWith('/auth/callback')) {
-    return NextResponse.redirect(new URL('/login', request.url));
+    return NextResponse.redirect(new URL('/login', getBaseUrl()));
   }
 
   // If user is signed in and the current path is /login,
   // redirect the user to /
   if (user && request.nextUrl.pathname.startsWith('/login')) {
-    return NextResponse.redirect(new URL('/', request.url));
+    return NextResponse.redirect(new URL('/', getBaseUrl()));
   }
 
   return response;
