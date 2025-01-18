@@ -161,3 +161,37 @@ export const createTravelPlan = async (userId: string, destination: string, star
     throw error;
   }
 };
+
+export const deleteTravelPlan = async (userId: string, destination: string, start_date: string, end_date: string) => {
+  console.log('\n=== DELETING TRAVEL PLAN ===');
+  console.log('User ID:', userId);
+  console.log('Destination:', destination);
+  console.log('Start Date:', start_date);
+  console.log('End Date:', end_date);
+
+  try {
+    const { data, error } = await supabase
+      .from('travel_plans')
+      .delete()
+      .match({
+        user_id: userId,
+        destination: destination.toLowerCase(),
+        start_date,
+        end_date
+      })
+      .select();
+
+    if (error) throw error;
+
+    console.log('\n✅ TRAVEL PLAN DELETED');
+    console.log('Deleted Data:', data);
+    console.log('===========================\n');
+    
+    return data;
+  } catch (error) {
+    console.log('\n❌ FAILED TO DELETE TRAVEL PLAN');
+    console.log('Error:', error instanceof Error ? error.message : 'Unknown error');
+    console.log('===========================\n');
+    throw error;
+  }
+};

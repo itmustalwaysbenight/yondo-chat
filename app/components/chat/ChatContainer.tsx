@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import ChatHeader from './ChatHeader';
+import { useEffect } from 'react';
 
 interface Message {
   content: string;
@@ -14,7 +15,7 @@ interface Message {
 }
 
 export default function ChatContainer() {
-  const { messages, isLoading, error, sendMessage } = useChat();
+  const { messages, isLoading, error, sendMessage, addMessage: hookAddMessage } = useChat();
   const router = useRouter();
 
   const handleSignOut = async () => {
@@ -26,9 +27,18 @@ export default function ChatContainer() {
     router.push('/login');
   };
 
+  const addMessage = (content: string) => {
+    console.log('ChatContainer: Adding message:', content);
+    hookAddMessage(content);
+  };
+
+  useEffect(() => {
+    console.log('Current messages:', messages);
+  }, [messages]);
+
   return (
     <div className="flex flex-col h-screen bg-[#343541]">
-      <ChatHeader onSignOut={handleSignOut} />
+      <ChatHeader onSignOut={handleSignOut} addMessage={addMessage} />
       <div className="flex-1 overflow-hidden relative">
         <div className="h-full overflow-y-auto">
           <div className="max-w-2xl mx-auto px-4">

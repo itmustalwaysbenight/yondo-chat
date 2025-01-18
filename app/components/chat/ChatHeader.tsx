@@ -2,20 +2,26 @@
 'use client';
 
 import { supabase, checkUserTrips } from '../../lib/supabase/client';
+import { formatTravelPlans } from '../../lib/gemini/client';
 
-export default function ChatHeader() {
-  const handleCheckTrips = () => {
-    alert('Checking trips...');
+interface ChatHeaderProps {
+  onSignOut: () => void;
+  addMessage: (content: string) => void;
+}
+
+export default function ChatHeader({ onSignOut, addMessage }: ChatHeaderProps) {
+  const handleCheckTrips = async () => {
     console.log('🔍 Check Trips button clicked');
-    checkUserTrips()
-      .then(trips => {
-        console.log('✅ Trips fetched successfully:', trips);
-        alert('Check console for trips!');
-      })
-      .catch(error => {
-        console.error('❌ Error fetching trips:', error);
-        alert('Error fetching trips. Check console.');
-      });
+    try {
+      const trips = await checkUserTrips();
+      if (trips) {
+        const formattedTrips = await formatTravelPlans(trips);
+        addMessage(formattedTrips);
+      }
+    } catch (error) {
+      console.error('Error checking trips:', error);
+      addMessage("Sorry, I couldn't retrieve your trips right now.");
+    }
   };
 
   const handleSignOut = async () => {
