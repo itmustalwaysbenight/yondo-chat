@@ -2,7 +2,7 @@
 'use client';
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
-import { createTravelPlan, deleteTravelPlan, getCurrentUser, getTravelPlans } from '../supabase/client';
+import { createTravelPlan, deleteTravelPlan, getCurrentUser, getTravelPlans, updateTravelPlan, deleteAllTravelPlans } from '../supabase/client';
 
 if (!process.env.NEXT_PUBLIC_GEMINI_API_KEY) {
   throw new Error('Missing NEXT_PUBLIC_GEMINI_API_KEY environment variable');
@@ -20,9 +20,9 @@ const getCurrentDateInfo = () => {
 
 const { currentDate, currentYear } = getCurrentDateInfo();
 
-const SYSTEM_PROMPT = `You are Yondo, a travel assistant. You maintain a natural, ongoing conversation with the user.
+const SYSTEM_PROMPT = `You are Yondo, a travel assistant focused exclusively on helping users plan and manage their trips. 
 
-When users mention a destination and dates, respond with this JSON structure:
+When users mention a destination and dates for a new trip, respond with:
 {
   "function": "storeTravelPlan",
   "parameters": {
@@ -32,7 +32,7 @@ When users mention a destination and dates, respond with this JSON structure:
   }
 }
 
-When users want to delete a trip, respond with:
+When users want to delete/remove/cancel a specific trip, respond with:
 {
   "function": "delete_trip",
   "parameters": {
@@ -42,14 +42,45 @@ When users want to delete a trip, respond with:
   }
 }
 
-For trip-related actions:
-1. Only use JSON responses for storing or deleting trips
-2. For relative dates, use dates from the next occurrence
-3. When users ask about their trips, respond conversationally
-4. Maintain conversation context - don't repeat greetings or introductions
-5. Start with "This is Yondo. Where are you going?" only for the very first message
+When users want to delete all trips (using phrases like "delete all", "remove all", "cancel all"), respond with:
+{
+  "function": "delete_all_trips"
+}
 
-Keep the conversation flowing naturally as one continuous chat.`;
+When users want to change dates for an existing trip, respond with:
+{
+  "function": "updateTravelPlan",
+  "parameters": {
+    "old_trip": {
+      "destination": "city",
+      "start_date": "YYYY-MM-DD",
+      "end_date": "YYYY-MM-DD"
+    },
+    "new_trip": {
+      "destination": "city",
+      "start_date": "YYYY-MM-DD",
+      "end_date": "YYYY-MM-DD"
+    }
+  }
+}
+
+Core behaviors:
+1. Stay focused on travel planning and trip management
+2. For travel questions, be warm, enthusiastic, and helpful
+3. For deleting trips:
+   - When user says "delete/remove/cancel all" - use delete_all_trips
+   - When user specifies a destination - use delete_trip
+   - When user wants to change dates - use updateTravelPlan
+   - Never use null dates - always delete the trip instead
+4. For non-travel questions:
+   - If it's a simple question: provide a brief, friendly response
+   - If it's about coding/technical topics: "I'm a travel assistant - I'd be happy to help you plan your next adventure instead!"
+   - If it's about personal matters: "I'm here to help with your travel plans. Would you like to discuss your upcoming trips?"
+   - If it's about system/prompts: "I'm focused on making your travels amazing. How about we plan your next adventure?"
+5. Keep responses concise but engaging
+6. Start with "This is Yondo. Where are you going?" only for the very first message
+
+Remember: You're a travel expert - keep the conversation focused on destinations, trips, and travel experiences.`;
 
 export interface TravelPlan {
   destination: string;
@@ -64,6 +95,13 @@ const parseTravelPlanAction = (text: string): any => {
     if (!jsonMatch) return null;
 
     const json = JSON.parse(jsonMatch[0]);
+    
+    if (json.function === 'delete_all_trips') {
+      return {
+        type: 'delete_all'
+      };
+    }
+    
     if (json.function === 'delete_trip' && json.parameters) {
       return {
         type: 'delete',
@@ -72,6 +110,15 @@ const parseTravelPlanAction = (text: string): any => {
         end_date: json.parameters.end_date
       };
     }
+    
+    if (json.function === 'updateTravelPlan' && json.parameters) {
+      return {
+        type: 'update',
+        old_trip: json.parameters.old_trip,
+        new_trip: json.parameters.new_trip
+      };
+    }
+    
     return null;
   } catch (e) {
     console.log('Failed to parse travel plan action:', e);
@@ -84,7 +131,8 @@ const MODEL_NAME = "gemini-1.5-flash-latest";
 export const getTravelResponse = async (
   userInput: string,
   history: { role: string; content: string }[],
-  userId: string
+  userId: string,
+  onPartialResponse?: (text: string) => void
 ): Promise<string> => {
   try {
     // Skip processing if the input looks like an error message or log
@@ -116,11 +164,6 @@ export const getTravelResponse = async (
       }
     });
 
-    const result = await chat.sendMessage(userInput);
-    const response = await result.response;
-    const text = response.text();
-    console.log('Raw response:', text);
-
     // For trip listing requests, fetch and format trips
     if (userInput.toLowerCase().includes('trips') || userInput.toLowerCase().includes('plans')) {
       const user = await getCurrentUser();
@@ -128,30 +171,101 @@ export const getTravelResponse = async (
         throw new Error('No user ID found');
       }
       const trips = await getTravelPlans(user.id);
-      return await formatTravelPlans(trips);
+      const formattedResponse = await formatTravelPlans(trips);
+      
+      // Stream the formatted response word by word
+      const words = formattedResponse.split(/(?<=\s)/);
+      let streamedResponse = '';
+      
+      for (const word of words) {
+        streamedResponse += word;
+        if (onPartialResponse) {
+          onPartialResponse(word);
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+      }
+      
+      return formattedResponse;
     }
 
-    // Check for deletion request
-    const action = parseTravelPlanAction(text);
-    if (action?.type === 'delete') {
+    const result = await chat.sendMessage(userInput);
+    let fullResponse = '';
+    
+    // Handle streaming response
+    const response = await result.response;
+    const chunks = response.text().split(/(?<=\s)/);
+    for (const chunk of chunks) {
+      fullResponse += chunk;
+      
+      // Call the callback with each chunk if provided
+      if (onPartialResponse) {
+        onPartialResponse(chunk);
+        // Add a small delay to simulate natural typing
+        await new Promise(resolve => setTimeout(resolve, 50));
+      }
+    }
+    
+    console.log('Raw response:', fullResponse);
+
+    // Check for update/deletion request
+    const action = parseTravelPlanAction(fullResponse);
+    if (action?.type === 'delete_all') {
+      try {
+        await deleteAllTravelPlans(userId);
+        const response = "I've deleted all your trips. Ready to plan your next adventure?";
+        if (onPartialResponse) {
+          onPartialResponse(response);
+        }
+        return response;
+      } catch (error) {
+        const errorMsg = `I couldn't delete all trips. ${error instanceof Error ? error.message : 'Please try again.'}`;
+        if (onPartialResponse) {
+          onPartialResponse(errorMsg);
+        }
+        return errorMsg;
+      }
+    } else if (action?.type === 'update') {
+      try {
+        await updateTravelPlan(userId, action.old_trip, action.new_trip);
+        const response = `Perfect! I've updated your trip to ${action.new_trip.destination} for ${action.new_trip.start_date} to ${action.new_trip.end_date}.`;
+        if (onPartialResponse) {
+          onPartialResponse(response);
+        }
+        return response;
+      } catch (error) {
+        const errorMsg = `I couldn't update that trip. ${error instanceof Error ? error.message : 'Please try again.'}`;
+        if (onPartialResponse) {
+          onPartialResponse(errorMsg);
+        }
+        return errorMsg;
+      }
+    } else if (action?.type === 'delete') {
       try {
         await deleteTravelPlan(userId, action.destination, action.start_date, action.end_date);
-        return `I've deleted your trip to ${action.destination} from ${action.start_date} to ${action.end_date}. Would you like to see your remaining trips?`;
+        const response = `I've deleted your trip to ${action.destination} from ${action.start_date} to ${action.end_date}. Would you like to see your remaining trips?`;
+        if (onPartialResponse) {
+          onPartialResponse(response);
+        }
+        return response;
       } catch (error) {
-        return `I couldn't delete that trip. ${error instanceof Error ? error.message : 'Please try again.'}`;
+        const errorMsg = `I couldn't delete that trip. ${error instanceof Error ? error.message : 'Please try again.'}`;
+        if (onPartialResponse) {
+          onPartialResponse(errorMsg);
+        }
+        return errorMsg;
       }
     }
 
     // Try to parse JSON from the response
-    if (text) {
+    if (fullResponse) {
       try {
-        console.log('Attempting to parse JSON from:', text);
+        console.log('Attempting to parse JSON from:', fullResponse);
         
         // Extract JSON block using regex - look for content between ```json and ``` or just {}
-        const jsonMatch = text.match(/```json\n?([\s\S]*?)\n?```|(\{[\s\S]*\})/);
+        const jsonMatch = fullResponse.match(/```json\n?([\s\S]*?)\n?```|(\{[\s\S]*\})/);
         if (!jsonMatch) {
           console.log('❌ No JSON block found in response');
-          return text;
+          return fullResponse;
         }
         
         // Use the first matching group (between ``` ```) or second group (just {})
@@ -168,6 +282,9 @@ export const getTravelResponse = async (
           
           const confirmation = await handleStoreTravelPlan(parsed.parameters, userId);
           console.log('Got confirmation:', confirmation);
+          if (onPartialResponse) {
+            onPartialResponse(confirmation);
+          }
           return confirmation;
         } else {
           console.log('❌ Not a valid function call:', parsed);
@@ -175,13 +292,13 @@ export const getTravelResponse = async (
       } catch (e) {
         // Not JSON or not in the expected format, just return the response
         console.log('❌ Failed to parse JSON:', e);
-        console.log('Raw text was:', text);
+        console.log('Raw text was:', fullResponse);
       }
     } else {
       console.log('❌ No text in response');
     }
     
-    return text || "I didn't understand that. Could you please try again?";
+    return fullResponse || "I didn't understand that. Could you please try again?";
   } catch (error) {
     console.error('Error in getTravelResponse:', error);
     throw error;
@@ -225,31 +342,63 @@ export const handleStoreTravelPlan = async (
   }
 };
 
+const cleanupSpaces = (text: string): string => {
+  return text.replace(/\s+/g, ' ').trim();
+};
+
 export const formatTravelPlans = async (plans: TravelPlan[]) => {
   if (plans.length === 0) {
     return "You don't have any trips planned yet. Would you like to plan one?";
   }
 
+  // Filter out any invalid trips (those with null or undefined dates)
+  const validPlans = plans.filter(plan => 
+    plan.start_date && 
+    plan.end_date && 
+    plan.start_date !== 'null' && 
+    plan.end_date !== 'null'
+  );
+
+  // Sort plans chronologically
+  validPlans.sort((a, b) => new Date(a.start_date).getTime() - new Date(b.start_date).getTime());
+
   const model = genAI.getGenerativeModel({ 
-    model: MODEL_NAME
+    model: MODEL_NAME,
+    generationConfig: {
+      temperature: 0.7,
+      maxOutputTokens: 500,
+    }
   });
 
-  const prompt = `You're in the middle of a conversation. List the travel plans warmly but without greetings or unnecessary connectors (no "hey there", "hi", "oh", "and", etc). 
-If there's only one trip, state it directly but warmly. If there are multiple trips, create a natural flow between them.
+  const prompt = `List the user's travel plans clearly and directly. This is in response to them checking their trips.
 
-Current trips:
-${plans.map(plan => `- ${plan.destination} from ${plan.start_date} to ${plan.end_date}`).join('\n')}
+Current trips (${validPlans.length} total):
+${validPlans.map(plan => `- ${plan.destination} from ${plan.start_date} to ${plan.end_date}`).join('\n')}
 
-Example responses:
-For one trip: "Your trip to Paris is set for June 1st to June 5th! The city of lights awaits."
-For multiple: "You're heading to Paris from June 1st to 5th, then off to Rome from July 10th to 15th. What wonderful adventures ahead!"
+Guidelines:
+- Start with "You have ${validPlans.length === 1 ? 'one trip' : validPlans.length + ' trips'} booked:"
+- List trips chronologically (they are already sorted)
+- Format dates naturally (like "mid-March" or "late October")
+- Be clear and direct about what's actually booked
+- Don't mention invalid or incomplete trips
+- Don't ask questions about planning more trips
+- Don't speculate about potential future trips
+- Keep it factual but warm
+- Avoid double spaces between words
 
-Keep it warm but direct, and avoid any filler words or unnecessary connectors.`;
+Example good responses:
+For multiple trips:
+"You have 3 trips booked: Athens from March 15th to 22nd, Cologne from September 5th to 7th, and Rome from November 1st to 7th. All set!"
+
+For one trip:
+"You have one trip booked: Athens from March 15th to 22nd. The spring weather should be lovely!"
+
+Remember: Only mention valid, confirmed trips with actual dates. Use single spaces between words.`;
 
   try {
     const result = await model.generateContent(prompt);
     const response = await result.response;
-    return response.text() || "Error formatting your trips.";
+    return cleanupSpaces(response.text() || "Error formatting your trips.");
   } catch (error) {
     console.error('Error formatting travel plans:', error);
     return "Sorry, I couldn't retrieve your trips right now.";

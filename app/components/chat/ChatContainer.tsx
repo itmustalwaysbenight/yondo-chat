@@ -7,7 +7,7 @@ import { useRouter } from 'next/navigation';
 import ChatMessage from './ChatMessage';
 import ChatInput from './ChatInput';
 import ChatHeader from './ChatHeader';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 
 interface Message {
   content: string;
@@ -17,6 +17,15 @@ interface Message {
 export default function ChatContainer() {
   const { messages, isLoading, error, sendMessage, addMessage: hookAddMessage } = useChat();
   const router = useRouter();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]); // Scroll when messages change
 
   const handleSignOut = async () => {
     const { error } = await supabase.auth.signOut();
@@ -40,7 +49,7 @@ export default function ChatContainer() {
     <div className="flex flex-col h-screen bg-[#343541]">
       <ChatHeader onSignOut={handleSignOut} addMessage={addMessage} />
       <div className="flex-1 overflow-hidden relative">
-        <div className="h-full overflow-y-auto">
+        <div className="h-full overflow-y-auto" id="chat-messages">
           <div className="max-w-2xl mx-auto px-4">
             {error && (
               <div className="mt-4 p-4 bg-red-900/10 border border-red-900/20 text-red-400 rounded-md text-sm">
@@ -55,13 +64,7 @@ export default function ChatContainer() {
                   content={message.content}
                 />
               ))}
-              {isLoading && (
-                <div className="flex justify-center py-4">
-                  <div className="h-6 w-6">
-                    <div className="animate-spin h-full w-full rounded-full border-2 border-t-zinc-500 border-zinc-600"></div>
-                  </div>
-                </div>
-              )}
+              <div ref={messagesEndRef} /> {/* Scroll anchor */}
             </div>
           </div>
         </div>

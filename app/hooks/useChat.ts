@@ -16,45 +16,79 @@ export const useChat = () => {
   ]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
+  const [userId, setUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const checkUser = async () => {
+      try {
+        const { data: { user }, error } = await supabase.auth.getUser();
+        if (error) throw error;
+        if (user) {
+          setUserId(user.id);
+        } else {
+          window.location.href = '/login';
+        }
+      } catch (error) {
+        console.error('Error getting user:', error);
+        setError(error instanceof Error ? error.message : 'An error occurred');
+      }
+    };
+    checkUser();
+  }, []);
 
   const addMessage = (content: string) => {
-    console.log('Adding message:', content);
-    setMessages(prevMessages => {
-      console.log('Previous messages:', prevMessages);
-      const newMessages = [...prevMessages, {
-        role: 'assistant',
-        content
-      }];
+    console.log('Previous messages:', messages);
+    setMessages(prev => {
+      const newMessages = [...prev, { content, role: 'assistant' }];
       console.log('New messages:', newMessages);
       return newMessages;
     });
   };
 
+  const updateLastMessage = (content: string) => {
+    setMessages(prev => {
+      const newMessages = [...prev];
+      if (newMessages.length > 0) {
+        newMessages[newMessages.length - 1] = {
+          ...newMessages[newMessages.length - 1],
+          content: newMessages[newMessages.length - 1].content + content
+        };
+      }
+      return newMessages;
+    });
+  };
+
   const sendMessage = async (content: string) => {
-    if (!content.trim() && !isLoading) return;
+    if (!userId) {
+      setError('Chat not initialized');
+      return;
+    }
 
     try {
       setIsLoading(true);
       setError(null);
 
-      const user = await getCurrentUser();
-      if (!user?.id) {
-        throw new Error('No user ID found');
-      }
+      // Add user message
+      const userMessage = { content, role: 'user' };
+      setMessages(prev => [...prev, userMessage]);
 
-      const newMessages = [...messages, { role: 'user', content }];
-      setMessages(newMessages);
+      // Add empty assistant message that will be updated
+      setMessages(prev => [...prev, { content: '', role: 'assistant' }]);
 
-      const response = await getTravelResponse(content, messages, user.id);
-      
-      if (response) {
-        setMessages(prev => [...prev, { role: 'assistant', content: response }]);
-      }
-    } catch (e) {
-      console.error('Error in sendMessage:', e);
-      setError(e instanceof Error ? e.message : 'An error occurred');
-    } finally {
+      // Get streaming response
+      await getTravelResponse(
+        content,
+        messages,
+        userId,
+        (partialResponse) => {
+          updateLastMessage(partialResponse);
+        }
+      );
+
+      setIsLoading(false);
+    } catch (error) {
+      console.error('Error in sendMessage:', error);
+      setError(error instanceof Error ? error.message : 'An error occurred');
       setIsLoading(false);
     }
   };

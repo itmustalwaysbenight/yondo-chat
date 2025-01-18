@@ -195,3 +195,82 @@ export const deleteTravelPlan = async (userId: string, destination: string, star
     throw error;
   }
 };
+
+export const updateTravelPlan = async (
+  userId: string,
+  oldTrip: { destination: string; start_date: string; end_date: string },
+  newTrip: { destination: string; start_date: string; end_date: string }
+) => {
+  try {
+    console.log('\n=== UPDATING TRAVEL PLAN ===');
+    console.log('User ID:', userId);
+    console.log('Old trip:', oldTrip);
+    console.log('New trip:', newTrip);
+
+    // Delete the old trip
+    const { error: deleteError } = await supabase
+      .from('travel_plans')
+      .delete()
+      .match({
+        user_id: userId,
+        destination: oldTrip.destination.toLowerCase(),
+        start_date: oldTrip.start_date,
+        end_date: oldTrip.end_date
+      });
+
+    if (deleteError) throw deleteError;
+
+    // Create the new trip
+    const { data, error: insertError } = await supabase
+      .from('travel_plans')
+      .insert([
+        {
+          user_id: userId,
+          destination: newTrip.destination.toLowerCase(),
+          start_date: newTrip.start_date,
+          end_date: newTrip.end_date,
+        },
+      ])
+      .select()
+      .single();
+
+    if (insertError) throw insertError;
+
+    console.log('\n✅ TRAVEL PLAN UPDATED');
+    console.log('Updated Data:', data);
+    console.log('===========================\n');
+
+    return data;
+  } catch (error) {
+    console.error('\n❌ FAILED TO UPDATE TRAVEL PLAN');
+    console.error('Error:', error instanceof Error ? error.message : 'Unknown error');
+    console.error('===========================\n');
+    throw error;
+  }
+};
+
+export const deleteAllTravelPlans = async (userId: string) => {
+  console.log('\n=== DELETING ALL TRAVEL PLANS ===');
+  console.log('User ID:', userId);
+
+  try {
+    const { data, error } = await supabase
+      .from('travel_plans')
+      .delete()
+      .eq('user_id', userId)
+      .select();
+
+    if (error) throw error;
+
+    console.log('\n✅ ALL TRAVEL PLANS DELETED');
+    console.log('Number of trips deleted:', data?.length);
+    console.log('===========================\n');
+    
+    return data;
+  } catch (error) {
+    console.log('\n❌ FAILED TO DELETE ALL TRAVEL PLANS');
+    console.log('Error:', error instanceof Error ? error.message : 'Unknown error');
+    console.log('===========================\n');
+    throw error;
+  }
+};
