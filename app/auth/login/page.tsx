@@ -1,6 +1,6 @@
 'use client';
 
-import { signInWithGoogle } from '../../../lib/supabase/client';
+import { signInWithGoogle } from '../../lib/supabase/client';
 
 export default function LoginPage() {
   return (
