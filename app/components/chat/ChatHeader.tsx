@@ -3,6 +3,7 @@
 
 import { supabase, checkUserTrips } from '../../lib/supabase/client';
 import { formatTravelPlans } from '../../lib/gemini/client';
+import { getBaseUrl } from '../../lib/utils/url';
 
 interface ChatHeaderProps {
   onSignOut: () => void;
@@ -27,7 +28,7 @@ export default function ChatHeader({ onSignOut, addMessage }: ChatHeaderProps) {
   const handleSignOut = async () => {
     try {
       await supabase.auth.signOut();
-      window.location.href = '/login';
+      window.location.href = `${getBaseUrl()}/login`;
     } catch (error) {
       console.error('Error signing out:', error);
     }
